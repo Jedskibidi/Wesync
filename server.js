@@ -83,8 +83,8 @@ app.get("/songs", (req, res) => {
   res.json(songs);
 });
 
-// Rooms
-const rooms = new Map(); // code -> { code, members: Map(socketId -> nickname) }
+// Rooms (B6 + B7 + B8)
+const rooms = new Map();
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateRoomCode() {
@@ -98,8 +98,38 @@ function generateRoomCode() {
   return code;
 }
 
-// The host is whoever joined first (a Map keeps insertion order),
-// so if the host leaves, the next person becomes host automatically.
+// ---- Room state (B8) ----
+// position is in seconds. lastUpdated is when position was last set (ms).
+function createRoom(code, socketId, nickname) {
+  return {
+    code,
+    members: new Map([[socketId, nickname]]),
+    currentSong: null, // file name, for example "Magnolia.mp3"
+    isPlaying: false,
+    position: 0,
+    lastUpdated: Date.now(),
+    queue: [], // filled in B14
+  };
+}
+
+// The real position right now. While playing, time keeps moving.
+function getCurrentPosition(room) {
+  if (!room.isPlaying) return room.position;
+  const elapsedSeconds = (Date.now() - room.lastUpdated) / 1000;
+  return Math.max(0, room.position + elapsedSeconds);
+}
+
+// Apply changes. If no position is given, freeze the current one first,
+// so pausing or changing songs never makes the position jump.
+function updateRoom(room, changes) {
+  const position =
+    changes.position !== undefined
+      ? changes.position
+      : getCurrentPosition(room);
+  Object.assign(room, changes, { position, lastUpdated: Date.now() });
+}
+
+// The host is whoever joined first (a Map keeps insertion order).
 function getHost(room) {
   return room.members.values().next().value;
 }
@@ -109,7 +139,14 @@ function membersPayload(room) {
 }
 
 function roomSnapshot(room) {
-  return { code: room.code, ...membersPayload(room) };
+  return {
+    code: room.code,
+    ...membersPayload(room),
+    currentSong: room.currentSong,
+    isPlaying: room.isPlaying,
+    position: getCurrentPosition(room),
+    queue: room.queue,
+  };
 }
 
 function cleanNickname(value) {
@@ -160,7 +197,7 @@ io.on("connection", (socket) => {
     leaveCurrentRoom(socket);
 
     const code = generateRoomCode();
-    const room = { code, members: new Map([[socket.id, nickname]]) };
+    const room = createRoom(code, socket.id, nickname);
     rooms.set(code, room);
 
     socket.join(code);
@@ -206,6 +243,34 @@ io.on("connection", (socket) => {
     console.log(`${nickname} joined room ${code}`);
     socket.emit("roomState", roomSnapshot(room));
     socket.to(code).emit("membersUpdate", membersPayload(room));
+  });
+
+  // Ask the server for the current room state
+  socket.on("getState", () => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) {
+      return socket.emit("roomError", { message: "You are not in a room" });
+    }
+    socket.emit("roomState", roomSnapshot(room));
+  });
+
+  // TEMPORARY: lets test.html change the state before B9 to B11 exist.
+  // Remove this in B9.
+  socket.on("debugSetState", (data = {}) => {
+    const room = rooms.get(socket.roomCode);
+    if (!room) {
+      return socket.emit("roomError", { message: "You are not in a room" });
+    }
+
+    const changes = {};
+    if (data.song !== undefined) changes.currentSong = data.song;
+    if (typeof data.isPlaying === "boolean") changes.isPlaying = data.isPlaying;
+    if (typeof data.position === "number") {
+      changes.position = Math.max(0, data.position);
+    }
+
+    updateRoom(room, changes);
+    io.to(room.code).emit("roomState", roomSnapshot(room));
   });
 
   socket.on("disconnect", () => {

@@ -9,6 +9,7 @@
         margin: 24px auto;
       }
       input,
+      select,
       button {
         padding: 6px 10px;
         margin: 2px;
@@ -19,6 +20,12 @@
         height: 180px;
         overflow: auto;
         font-size: 13px;
+      }
+      #state {
+        background: #f3f3f3;
+        padding: 8px;
+        font-size: 13px;
+        white-space: pre-wrap;
       }
       .err {
         color: #b00020;
@@ -41,6 +48,19 @@
     <p>Current room: <b id="room">none</b></p>
     <p>Members: <b id="members">-</b></p>
 
+    <h3>Room state (B8)</h3>
+    <select id="songSelect"></select>
+    <br />
+    <button id="setSong">Set song</button>
+    <button id="play">Play</button>
+    <button id="pause">Pause</button>
+    <button id="seek30">Seek to 30s</button>
+    <button id="seek0">Back to 0</button>
+    <button id="getState">Get state</button>
+
+    <p>Live position: <b id="livePos">-</b> s</p>
+    <div id="state">No state yet</div>
+
     <h3>Log</h3>
     <div id="log"></div>
 
@@ -48,6 +68,9 @@
     <script>
       const socket = io();
       const $ = (id) => document.getElementById(id);
+
+      let lastState = null;
+      let receivedAt = 0;
 
       function log(text, isError) {
         const line = document.createElement("div");
@@ -62,6 +85,24 @@
           .join(", ");
       }
 
+      // Fill the song dropdown from /songs
+      fetch("/songs")
+        .then((res) => res.json())
+        .then((songs) => {
+          $("songSelect").innerHTML = songs
+            .map((s) => `<option value="${s.file}">${s.title}</option>`)
+            .join("");
+        });
+
+      // Position ticks on its own, the same way a real player will do it
+      setInterval(() => {
+        if (!lastState) return;
+        const pos = lastState.isPlaying
+          ? lastState.position + (Date.now() - receivedAt) / 1000
+          : lastState.position;
+        $("livePos").textContent = pos.toFixed(1);
+      }, 100);
+
       socket.on("connect", () => {
         $("status").textContent = "connected";
         log("Connected as " + socket.id);
@@ -74,9 +115,21 @@
       });
 
       socket.on("roomState", (state) => {
+        lastState = state;
+        receivedAt = Date.now();
         $("room").textContent = state.code;
         showMembers(state.members, state.host);
-        log("Joined room " + state.code);
+        $("state").textContent = JSON.stringify(
+          {
+            currentSong: state.currentSong,
+            isPlaying: state.isPlaying,
+            position: Number(state.position.toFixed(2)),
+            queue: state.queue,
+          },
+          null,
+          2,
+        );
+        log("State received");
       });
       socket.on("membersUpdate", (data) => {
         showMembers(data.members, data.host);
@@ -93,6 +146,23 @@
           nickname: $("nickname").value,
         });
       };
+
+      // B8 test buttons (temporary events)
+      $("setSong").onclick = () => {
+        socket.emit("debugSetState", {
+          song: $("songSelect").value,
+          position: 0,
+          isPlaying: false,
+        });
+      };
+      $("play").onclick = () =>
+        socket.emit("debugSetState", { isPlaying: true });
+      $("pause").onclick = () =>
+        socket.emit("debugSetState", { isPlaying: false });
+      $("seek30").onclick = () =>
+        socket.emit("debugSetState", { position: 30 });
+      $("seek0").onclick = () => socket.emit("debugSetState", { position: 0 });
+      $("getState").onclick = () => socket.emit("getState");
     </script>
   </body>
 </html>
