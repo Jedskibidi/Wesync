@@ -54,12 +54,10 @@ app.post("/upload", (req, res) => {
     }
     if (err) return res.status(400).json({ ok: false, error: err.message });
     if (!req.file) {
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: 'No file uploaded (field name must be "song")',
-        });
+      return res.status(400).json({
+        ok: false,
+        error: 'No file uploaded (field name must be "song")',
+      });
     }
     res.json({ ok: true, file: req.file.filename });
   });
@@ -85,13 +83,106 @@ app.get("/songs", (req, res) => {
   res.json(songs);
 });
 
+// Rooms
+const rooms = new Map(); 
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
+
+function generateRoomCode() {
+  let code;
+  do {
+    code = Array.from(
+      { length: 4 },
+      () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)],
+    ).join("");
+  } while (rooms.has(code));
+  return code;
+}
+
+function roomSnapshot(room) {
+  return { code: room.code, members: [...room.members.values()] };
+}
+
+function cleanNickname(value) {
+  return String(value || "")
+    .trim()
+    .slice(0, 20);
+}
+
+function leaveCurrentRoom(socket) {
+  const code = socket.roomCode;
+  if (!code) return;
+
+  socket.leave(code);
+  socket.roomCode = null;
+
+  const room = rooms.get(code);
+  if (!room) return;
+
+  room.members.delete(socket.id);
+  if (room.members.size === 0) {
+    rooms.delete(code);
+    console.log(`Room ${code} deleted (empty)`);
+  } else {
+    io.to(code).emit("membersUpdate", [...room.members.values()]);
+  }
+}
+
 // socket.io connection handling
 io.on("connection", (socket) => {
   console.log(`Connected:    ${socket.id} (online: ${io.engine.clientsCount})`);
   io.emit("onlineCount", io.engine.clientsCount);
 
+  socket.on("createRoom", (data = {}) => {
+    const nickname = cleanNickname(data.nickname);
+    if (!nickname) {
+      return socket.emit("roomError", { message: "Please enter a nickname" });
+    }
+
+    leaveCurrentRoom(socket);
+
+    const code = generateRoomCode();
+    const room = { code, members: new Map([[socket.id, nickname]]) };
+    rooms.set(code, room);
+
+    socket.join(code);
+    socket.roomCode = code;
+
+    console.log(`Room ${code} created by ${nickname}`);
+    socket.emit("roomState", roomSnapshot(room));
+  });
+
+  socket.on("joinRoom", (data = {}) => {
+    const nickname = cleanNickname(data.nickname);
+    const code = String(data.code || "")
+      .trim()
+      .toUpperCase();
+
+    if (!nickname) {
+      return socket.emit("roomError", { message: "Please enter a nickname" });
+    }
+    const room = rooms.get(code);
+    if (!room) {
+      return socket.emit("roomError", {
+        message: `Room ${code || "?"} not found`,
+      });
+    }
+
+    leaveCurrentRoom(socket);
+
+    room.members.set(socket.id, nickname);
+    socket.join(code);
+    socket.roomCode = code;
+
+    console.log(`${nickname} joined room ${code}`);
+    socket.emit("roomState", roomSnapshot(room));
+    socket.to(code).emit("membersUpdate", [...room.members.values()]);
+  });
+
   socket.on("disconnect", () => {
-    console.log(`Disconnected: ${socket.id} (online: ${io.engine.clientsCount})`);
+    leaveCurrentRoom(socket);
+    console.log(
+      `Disconnected: ${socket.id} (online: ${io.engine.clientsCount})`,
+    );
     io.emit("onlineCount", io.engine.clientsCount);
   });
 });
