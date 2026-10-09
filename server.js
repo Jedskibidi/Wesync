@@ -13,6 +13,9 @@ const PORT = process.env.PORT || 3000;
 const MUSIC_DIR = path.join(__dirname, "music");
 fs.mkdirSync(MUSIC_DIR, { recursive: true });
 
+// How often every room sends a syncTick (B13), in milliseconds
+const TICK_INTERVAL_MS = 4000;
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/music", express.static(MUSIC_DIR));
@@ -107,6 +110,7 @@ function createRoom(code, socketId, nickname) {
     position: 0,
     lastUpdated: Date.now(),
     queue: [], // filled in B14
+    tickTimer: null, // B13: the interval that sends syncTick
   };
 }
 
@@ -123,6 +127,26 @@ function updateRoom(room, changes) {
       ? changes.position
       : getCurrentPosition(room);
   Object.assign(room, changes, { position, lastUpdated: Date.now() });
+}
+
+// ---- Sync ticks (B13) ----
+// Every few seconds, tell everyone in the room where the song should be,
+// so each client can fix small drifts by itself.
+function startTicks(room) {
+  if (room.tickTimer) return; // never run two timers for one room
+  room.tickTimer = setInterval(() => {
+    if (room.members.size === 0 || !room.currentSong) return;
+    io.to(room.code).emit("syncTick", {
+      position: getCurrentPosition(room),
+      isPlaying: room.isPlaying,
+    });
+  }, TICK_INTERVAL_MS);
+}
+
+function stopTicks(room) {
+  if (!room.tickTimer) return;
+  clearInterval(room.tickTimer);
+  room.tickTimer = null;
 }
 
 // The host is whoever joined first (a Map keeps insertion order).
@@ -172,8 +196,9 @@ function leaveCurrentRoom(socket) {
 
   room.members.delete(socket.id);
   if (room.members.size === 0) {
+    stopTicks(room); // B13: no members, so no timer
     rooms.delete(code);
-    console.log(`Room ${code} deleted (empty)`);
+    console.log(`Room ${code} deleted (empty), ticks stopped`);
   } else {
     io.to(code).emit("membersUpdate", membersPayload(room));
   }
@@ -209,6 +234,7 @@ io.on("connection", (socket) => {
     const code = generateRoomCode();
     const room = createRoom(code, socket.id, nickname);
     rooms.set(code, room);
+    startTicks(room); // B13
 
     socket.join(code);
     socket.roomCode = code;
@@ -261,7 +287,6 @@ io.on("connection", (socket) => {
     if (!room) return;
     socket.emit("roomState", roomSnapshot(room));
   });
-
 
   // play {position}  (position is optional)
   socket.on("play", (data = {}) => {

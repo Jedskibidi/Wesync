@@ -273,8 +273,6 @@ audio.addEventListener("timeupdate", updateTimeDisplay);
 // If sound is really playing, the overlay is not needed anymore.
 audio.addEventListener("playing", hideOverlay);
 
-// ---------- Song list ----------
-
 fetch("/songs")
   .then((res) => res.json())
   .then((songs) => {
