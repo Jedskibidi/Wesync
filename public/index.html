@@ -62,8 +62,10 @@
       <!-- Shown after you are in a room (roominfo.js adds the member count,
            "Copy invite link" and "Leave room" to this card) -->
       <section id="roomInfo" class="room card" aria-label="Room info" hidden>
-        <p class="room-info">Room: <b id="room">none</b></p>
-        <ul id="members" class="members" aria-label="Members"></ul>
+        <p class="room-info">
+          Room: <b id="room">none</b> &nbsp;|&nbsp; Members:
+          <span id="members">-</span>
+        </p>
       </section>
 
       <div class="layout">
@@ -72,6 +74,17 @@
           <div class="lcd">
             <span id="lcdTrack">INSERT DISC</span>
             <span id="lcdTime">00:00</span>
+          </div>
+
+          <!-- Now playing: song title, cover art placeholder, "Picked by" -->
+          <div class="now-playing">
+            <div class="np-art" role="img" aria-label="Cover art placeholder"></div>
+            <div class="np-text">
+              <p id="npTitle" class="np-title" aria-live="polite">
+                Nothing playing
+              </p>
+              <p id="npPicker" class="np-picker" hidden></p>
+            </div>
           </div>
 
           <div class="deck-controls">

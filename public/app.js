@@ -3,7 +3,7 @@
 // IDs this file needs (keep them in index.html):
 //   status, message, nickname, nicknameError, create, code, codeError, join,
 //   inviteHint, roomSection, roomInfo, room, members,
-//   lcdTrack, lcdTime, playlist, addBtn, queueList, audio,
+//   lcdTrack, lcdTime, npTitle, npPicker, playlist, addBtn, queueList, audio,
 //   previous, playPause, next,
 //   currentTime, seek, duration, volume, mute, joinOverlay, joinListening,
 //   dropZone, songFile, uploadStatus
@@ -15,6 +15,9 @@
 //            addToQueue, removeFromQueue, next, previous, songEnded
 //   receive: roomState, membersUpdate, roomError, play, pause, seek,
 //            changeSong, syncTick, queueUpdate
+//
+// "Picked by": the server can send the picker's nickname as `pickedBy` in
+// roomState, and as `by` in changeSong. If it does not, the line stays hidden.
 
 const socket = io();
 const $ = (id) => document.getElementById(id);
@@ -30,6 +33,7 @@ const ROOM_CODE_PATTERN = /^[A-Z0-9]{4}$/;
 
 let inRoom = false;
 let currentSong = null; // file name of the song loaded in the <audio>
+let pickedBy = null; // nickname of whoever picked the current song (rooms only)
 let isSeeking = false; // true while the user drags the seek bar
 
 // What the room is doing, as last told by the server (or by our own buttons).
@@ -89,42 +93,10 @@ function showError(text) {
   }, ERROR_VISIBLE_MS);
 }
 
-// Draw the member list: every nickname, with "You" and "host" badges.
-// textContent only, so a nickname can never inject HTML.
 function showMembers(members, host) {
-  const me = submittedNickname.toLowerCase();
-  const list = $("members");
-  list.textContent = "";
-
-  // You first, then the others in the order they joined
-  const ordered = [...members].sort(
-    (a, b) => (b.toLowerCase() === me) - (a.toLowerCase() === me),
-  );
-
-  for (const name of ordered) {
-    const item = document.createElement("li");
-    item.className = "member";
-
-    const label = document.createElement("span");
-    label.className = "member-name";
-    label.textContent = name;
-    item.appendChild(label);
-
-    if (name.toLowerCase() === me) {
-      item.classList.add("is-you");
-      const you = document.createElement("span");
-      you.className = "badge badge-you";
-      you.textContent = "You";
-      item.appendChild(you);
-    }
-    if (name === host) {
-      const hostBadge = document.createElement("span");
-      hostBadge.className = "badge badge-host";
-      hostBadge.textContent = "Host";
-      item.appendChild(hostBadge);
-    }
-    list.appendChild(item);
-  }
+  $("members").textContent = members
+    .map((name) => (name === host ? `${name} (host)` : name))
+    .join(", ");
 }
 
 function showOverlay() {
@@ -226,11 +198,30 @@ function updateTimeDisplay() {
 function updateLcdTitle() {
   if (!currentSong) {
     $("lcdTrack").textContent = "INSERT DISC";
-    return;
+  } else {
+    const index = library.findIndex((song) => song.file === currentSong);
+    const number = index >= 0 ? String(index + 1).padStart(2, "0") + " " : "";
+    $("lcdTrack").textContent = number + titleFromFile(currentSong);
   }
-  const index = library.findIndex((song) => song.file === currentSong);
-  const number = index >= 0 ? String(index + 1).padStart(2, "0") + " " : "";
-  $("lcdTrack").textContent = number + titleFromFile(currentSong);
+  updateNowPlaying();
+}
+
+// The big title, the cover placeholder and the "Picked by" line.
+// textContent (not innerHTML) so a nickname or title can never inject HTML.
+function updateNowPlaying() {
+  $("npTitle").textContent = currentSong
+    ? titleFromFile(currentSong)
+    : "Nothing playing";
+
+  // "Picked by" only makes sense in a room, and only if we know who
+  const picker = $("npPicker");
+  if (inRoom && currentSong && pickedBy) {
+    picker.textContent = `Picked by ${pickedBy}`;
+    picker.hidden = false;
+  } else {
+    picker.textContent = "";
+    picker.hidden = true;
+  }
 }
 
 // Turn the controls on or off and keep the play/pause label correct.
@@ -298,8 +289,11 @@ function expectedPosition() {
 
 // ---------- Audio actions (these never send anything to the server) ----------
 
-function loadSong(file) {
+// "by" is the nickname of whoever picked the song (null when playing alone
+// or when we do not know).
+function loadSong(file, by = null) {
   currentSong = file;
+  pickedBy = by;
   audio.src = "/music/" + encodeURIComponent(file);
   audio.load();
   audio.pause();
@@ -315,6 +309,7 @@ function loadSong(file) {
 
 function clearSong() {
   currentSong = null;
+  pickedBy = null;
   needsSync = false;
   audio.pause();
   audio.removeAttribute("src");
@@ -382,7 +377,13 @@ function applyState(state) {
     return;
   }
 
-  if (state.currentSong !== currentSong) loadSong(state.currentSong);
+  if (state.currentSong !== currentSong) {
+    loadSong(state.currentSong, state.pickedBy || null);
+  } else {
+    // Same song, but the picker (or the fact that we are in a room) may differ
+    pickedBy = state.pickedBy || null;
+    updateNowPlaying();
+  }
   syncAudioToRoom();
 }
 
@@ -405,6 +406,7 @@ socket.on("disconnect", () => {
   hideOverlay();
   audio.pause();
   updateControls();
+  updateNowPlaying(); // hides "Picked by" while we are out of the room
   if (lastRoom) {
     // We will try to rejoin automatically when the connection returns
     showMessage("Connection lost. Reconnecting...");
@@ -474,8 +476,9 @@ socket.on("seek", ({ position }) => {
   syncAudioToRoom();
 });
 
-socket.on("changeSong", ({ song }) => {
-  loadSong(song);
+// "by" is the nickname of the person who picked the song (if the server sends it)
+socket.on("changeSong", ({ song, by }) => {
+  loadSong(song, by || null);
   remember(0, false);
   syncAudioToRoom(); // the file is still loading, so this waits for metadata
 });
@@ -508,8 +511,7 @@ socket.on("syncTick", ({ position, isPlaying }) => {
 
 // Returns the trimmed nickname, or "" (after showing an error) if it is empty.
 function readNickname() {
-  // Same cleaning as the server (spaces, 20 letters), so "You" matches
-  const nickname = $("nickname").value.trim().replace(/\s+/g, " ").slice(0, 20);
+  const nickname = $("nickname").value.trim();
   if (!nickname) {
     showFieldError("nickname", "Please enter a nickname");
     return "";
@@ -604,8 +606,9 @@ function readInviteFromUrl() {
 }
 
 // Clicking a song in the playlist: load it and start playing.
+// In a room, we are the one who picked it.
 function chooseSong(file) {
-  loadSong(file);
+  loadSong(file, inRoom ? submittedNickname : null);
   remember(0, true);
   playAudio();
   if (inRoom) {
@@ -993,6 +996,7 @@ dropZone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer.files));
 // ---------- Start ----------
 
 updateControls(); // everything starts disabled until a song is loaded
+updateNowPlaying(); // shows "Nothing playing" until a song is loaded
 updateSeekFill();
 updateVolumeFill();
 loadSongs();
