@@ -1,17 +1,22 @@
-// Wesync client: Socket.IO + audio player + sync.
+// Wesync client: Socket.IO + audio player + sync + queue.
 //
 // IDs this file needs (keep them in index.html):
 //   status, message, nickname, create, code, join, room, members,
-//   player, songSelect, setSong, audio, play, pause,
+//   player, songSelect, setSong, addToQueue, queueList, audio, play, pause,
 //   currentTime, seek, duration, volume, joinOverlay, joinListening
 //
 // Socket.IO events used:
-//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong
-//   receive: roomState, membersUpdate, roomError, play, pause, seek, changeSong
+//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
+//            addToQueue, removeFromQueue
+//   receive: roomState, membersUpdate, roomError, play, pause, seek,
+//            changeSong, syncTick, queueUpdate
 
 const socket = io();
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
+
+// If our audio is more than this many seconds off the room, we jump (B13/F13)
+const DRIFT_LIMIT_SECONDS = 0.3;
 
 let inRoom = false;
 let currentSong = null; // file name of the song loaded in the <audio>
@@ -54,6 +59,39 @@ function showOverlay() {
 
 function hideOverlay() {
   $("joinOverlay").hidden = true;
+}
+
+// ---------- Queue (F14) ----------
+
+// Draw the queue list. "queue" looks like [{ id, file, title }, ...].
+// We use textContent (not innerHTML) so a song title can never inject HTML.
+function renderQueue(queue) {
+  const list = $("queueList");
+  list.innerHTML = "";
+
+  if (!queue || queue.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "The queue is empty";
+    list.appendChild(empty);
+    return;
+  }
+
+  queue.forEach((item) => {
+    const li = document.createElement("li");
+
+    const title = document.createElement("span");
+    title.textContent = item.title + " ";
+
+    const removeButton = document.createElement("button");
+    removeButton.textContent = "Remove";
+    removeButton.onclick = () => {
+      socket.emit("removeFromQueue", { id: item.id });
+    };
+
+    li.appendChild(title);
+    li.appendChild(removeButton);
+    list.appendChild(li);
+  });
 }
 
 // ---------- Room playback memory ----------
@@ -129,6 +167,7 @@ function applyState(state) {
   $("player").hidden = false;
   $("room").textContent = state.code;
   showMembers(state.members, state.host);
+  renderQueue(state.queue);
 
   remember(state.position, state.isPlaying);
 
@@ -166,6 +205,10 @@ socket.on("membersUpdate", (data) => {
   showMembers(data.members, data.host);
 });
 
+socket.on("queueUpdate", ({ queue }) => {
+  renderQueue(queue);
+});
+
 socket.on("roomError", (err) => {
   showMessage(err.message);
 });
@@ -193,6 +236,28 @@ socket.on("changeSong", ({ song }) => {
   syncAudioToRoom(); // the file is still loading, so this waits for metadata
 });
 
+// Drift correction (F13): the server tells us every few seconds where the
+// song should be. If we are off by more than 0.3 s, jump to the right spot.
+socket.on("syncTick", ({ position, isPlaying }) => {
+  if (!inRoom || !currentSong) return;
+
+  remember(position, isPlaying);
+
+  // Do not interfere while loading, dragging the seek bar, or after the end
+  if (audio.readyState < 1 || isSeeking || audio.seeking || audio.ended) return;
+
+  if (!isPlaying) {
+    if (!audio.paused) audio.pause();
+  } else if (audio.paused) {
+    playAudio(); // the room is playing but we are not (may show the overlay)
+  }
+
+  const drift = audio.currentTime - position;
+  if (Math.abs(drift) > DRIFT_LIMIT_SECONDS) {
+    seekTo(position);
+  }
+});
+
 // ---------- Our own buttons: change our audio AND tell the server ----------
 
 $("create").onclick = () => {
@@ -215,6 +280,13 @@ $("setSong").onclick = () => {
   remember(0, false);
   needsSync = true;
   socket.emit("changeSong", { song });
+};
+
+// The server answers with queueUpdate, which redraws the list for everyone
+$("addToQueue").onclick = () => {
+  const song = $("songSelect").value;
+  if (!inRoom || !song) return;
+  socket.emit("addToQueue", { song });
 };
 
 $("play").onclick = () => {
