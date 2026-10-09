@@ -16,18 +16,52 @@
 
       <p id="message" class="message" role="status"></p>
 
+      <!-- First screen: start or join a listening room -->
       <section id="roomSection" class="room card" aria-label="Room">
-        <div class="field-row">
-          <input id="nickname" class="input" placeholder="Nickname" />
-          <button id="create" class="btn">Create Room</button>
+        <p id="inviteHint" class="room-info" hidden></p>
+
+        <div>
+          <label class="label" for="nickname">Your nickname</label>
           <input
-            id="code"
-            class="input code-input"
-            placeholder="Room code"
-            maxlength="4"
+            id="nickname"
+            class="input"
+            placeholder="Nickname"
+            maxlength="20"
+            autocomplete="off"
+            aria-describedby="nicknameError"
           />
-          <button id="join" class="btn btn-secondary">Join Room</button>
+          <p id="nicknameError" class="error-text" role="alert" hidden></p>
         </div>
+
+        <div class="field-row">
+          <button id="create" class="btn" type="button">Create Room</button>
+          <span class="room-info">or join a friend's room:</span>
+        </div>
+
+        <div>
+          <label class="label" for="code">Room code</label>
+          <div class="field-row">
+            <input
+              id="code"
+              class="input code-input"
+              placeholder="Room code"
+              maxlength="4"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              aria-describedby="codeError"
+            />
+            <button id="join" class="btn btn-secondary" type="button">
+              Join Room
+            </button>
+          </div>
+          <p id="codeError" class="error-text" role="alert" hidden></p>
+        </div>
+      </section>
+
+      <!-- Shown after you are in a room (roominfo.js adds the member count,
+           "Copy invite link" and "Leave room" to this card) -->
+      <section id="roomInfo" class="room card" aria-label="Room info" hidden>
         <p class="room-info">
           Room: <b id="room">none</b> &nbsp;|&nbsp; Members:
           <span id="members">-</span>
