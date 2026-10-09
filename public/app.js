@@ -1,3 +1,20 @@
+// Wesync client: Socket.IO + audio player + sync + queue + error handling.
+//
+// IDs this file needs (keep them in index.html):
+//   status, message, nickname, create, code, join, room, members,
+//   player, songSelect, setSong, addToQueue, queueList, audio,
+//   previous, play, pause, next,
+//   currentTime, seek, duration, volume, joinOverlay, joinListening,
+//   dropZone, songFile, uploadStatus
+//
+// HTTP routes used: GET /songs, POST /upload (FormData field "file")
+//
+// Socket.IO events used:
+//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
+//            addToQueue, removeFromQueue, next, previous, songEnded
+//   receive: roomState, membersUpdate, roomError, play, pause, seek,
+//            changeSong, syncTick, queueUpdate
+
 const socket = io();
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -576,15 +593,19 @@ audio.addEventListener("error", () => {
   showError("This song could not be loaded. Try another one.");
 });
 
-// ---------- Song list ----------
+// ---------- Song list (the "library") ----------
 
-fetch("/songs")
-  .then((res) => {
+// Fetch /songs and fill the dropdown. We call this on page load and again
+// after every successful upload. Returns true if the list was loaded.
+async function loadSongs() {
+  const select = $("songSelect");
+  const previous = select.value; // keep the user's pick if it still exists
+
+  try {
+    const res = await fetch("/songs");
     if (!res.ok) throw new Error("Bad response from /songs");
-    return res.json();
-  })
-  .then((songs) => {
-    const select = $("songSelect");
+    const songs = await res.json();
+
     select.innerHTML = "";
 
     if (!Array.isArray(songs) || songs.length === 0) {
@@ -592,7 +613,7 @@ fetch("/songs")
       option.value = "";
       option.textContent = "No songs found";
       select.appendChild(option);
-      return;
+      return true;
     }
 
     songs.forEach((song) => {
@@ -601,14 +622,147 @@ fetch("/songs")
       option.textContent = song.title;
       select.appendChild(option);
     });
-  })
-  .catch(() => {
+
+    if (previous && songs.some((song) => song.file === previous)) {
+      select.value = previous;
+    }
+    return true;
+  } catch {
     showError("Could not load the song list. Try refreshing the page.");
+    return false;
+  }
+}
+
+loadSongs();
+
+// ---------- Upload (.mp3 only) ----------
+
+// The server accepts any field name, but "song" is what it was written for.
+const UPLOAD_FIELD = "song";
+const MAX_UPLOAD_MB = 20; // same limit as the server
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
+
+const dropZone = $("dropZone");
+const songFile = $("songFile");
+const uploadStatus = $("uploadStatus");
+let uploading = false;
+
+function setUploadStatus(text, kind) {
+  uploadStatus.textContent = text;
+  uploadStatus.className = "upload-status" + (kind ? " " + kind : "");
+}
+
+// Returns an error message, or "" if the file is fine.
+// This only checks on the client; the server must check again.
+function checkFile(file) {
+  const isMp3Name = file.name.toLowerCase().endsWith(".mp3");
+  const typeOk = file.type === "" || file.type === "audio/mpeg";
+  if (!isMp3Name || !typeOk) return `${file.name}: only .mp3 files are allowed`;
+  if (file.size === 0) return `${file.name}: the file is empty`;
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return `${file.name}: too big (max ${MAX_UPLOAD_MB} MB)`;
+  }
+  return "";
+}
+
+async function uploadFiles(fileList) {
+  if (uploading) return;
+
+  const good = [];
+  const problems = [];
+  Array.from(fileList).forEach((file) => {
+    const error = checkFile(file);
+    if (error) problems.push(error);
+    else good.push(file);
   });
 
-// ---------- Start ----------
+  if (good.length === 0) {
+    setUploadStatus(problems[0] || "No file chosen", "error");
+    return;
+  }
 
-readInviteFromUrl();
-const libraryScript = document.createElement("script");
-libraryScript.src = "library.js";
-document.body.appendChild(libraryScript);
+  uploading = true;
+  dropZone.classList.add("is-busy");
+  let uploaded = 0;
+
+  for (const file of good) {
+    setUploadStatus(
+      `Uploading... ${file.name} (${uploaded + 1}/${good.length})`,
+    );
+    try {
+      const formData = new FormData();
+      formData.append(UPLOAD_FIELD, file, file.name);
+      const res = await fetch("/upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        // Show the server's own reason if it sent one (short text or {error|message})
+        let reason = "";
+        try {
+          const text = (await res.text()).trim();
+          try {
+            const data = JSON.parse(text);
+            reason = data.error || data.message || "";
+          } catch {
+            reason = text;
+          }
+        } catch {}
+        throw new Error(
+          `server said ${res.status}${reason ? ": " + reason.slice(0, 120) : ""}`,
+        );
+      }
+      uploaded++;
+    } catch (err) {
+      problems.push(`${file.name}: ${err.message}`);
+    }
+  }
+
+  // Refresh the library so the new songs show up in the dropdown
+  if (uploaded > 0) await loadSongs();
+
+  uploading = false;
+  dropZone.classList.remove("is-busy");
+
+  if (problems.length > 0) {
+    const done = uploaded > 0 ? `Uploaded ${uploaded}. ` : "";
+    setUploadStatus(`${done}Failed: ${problems.join("; ")}`, "error");
+  } else {
+    setUploadStatus(
+      `Uploaded ${uploaded} song${uploaded > 1 ? "s" : ""}!`,
+      "ok",
+    );
+  }
+}
+
+// Click or keyboard opens the file picker
+dropZone.addEventListener("click", () => songFile.click());
+dropZone.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    songFile.click();
+  }
+});
+
+songFile.addEventListener("change", () => {
+  const files = Array.from(songFile.files);
+  songFile.value = ""; // so choosing the same file again still fires "change"
+  uploadFiles(files);
+});
+
+// Drag and drop
+["dragenter", "dragover"].forEach((name) => {
+  dropZone.addEventListener(name, (e) => {
+    e.preventDefault();
+    dropZone.classList.add("is-drag");
+  });
+});
+["dragleave", "drop"].forEach((name) => {
+  dropZone.addEventListener(name, (e) => {
+    e.preventDefault();
+    dropZone.classList.remove("is-drag");
+  });
+});
+dropZone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer.files));
+
+// A file dropped outside the zone should not make the browser open it
+["dragover", "drop"].forEach((name) => {
+  window.addEventListener(name, (e) => e.preventDefault());
+});

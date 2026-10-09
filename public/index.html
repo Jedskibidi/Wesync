@@ -64,10 +64,16 @@
         <p class="room-info">Members: <span id="members">-</span></p>
       </section>
 
-      <section id="player" hidden>
-        <select id="songSelect"></select>
-        <button id="setSong">Set song</button>
-        <button id="addToQueue">Add to queue</button>
+    <section id="player" hidden>
+      <select id="songSelect"></select>
+      <button id="setSong">Set song</button>
+      <button id="addToQueue">Add to queue</button>
+
+      <div id="dropZone" class="drop" tabindex="0" role="button">
+        Drag .mp3 files here or click to choose
+      </div>
+      <input id="songFile" type="file" accept=".mp3,audio/mpeg" multiple hidden />
+      <p id="uploadStatus" class="upload-status" role="status" aria-live="polite"></p>
 
         <audio id="audio" preload="auto"></audio>
 
