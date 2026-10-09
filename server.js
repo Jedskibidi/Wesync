@@ -84,8 +84,8 @@ app.get("/songs", (req, res) => {
 });
 
 // Rooms
-const rooms = new Map(); 
-const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; 
+const rooms = new Map(); // code -> { code, members: Map(socketId -> nickname) }
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateRoomCode() {
   let code;
@@ -98,14 +98,33 @@ function generateRoomCode() {
   return code;
 }
 
+// The host is whoever joined first (a Map keeps insertion order),
+// so if the host leaves, the next person becomes host automatically.
+function getHost(room) {
+  return room.members.values().next().value;
+}
+
+function membersPayload(room) {
+  return { members: [...room.members.values()], host: getHost(room) };
+}
+
 function roomSnapshot(room) {
-  return { code: room.code, members: [...room.members.values()] };
+  return { code: room.code, ...membersPayload(room) };
 }
 
 function cleanNickname(value) {
   return String(value || "")
     .trim()
+    .replace(/\s+/g, " ")
     .slice(0, 20);
+}
+
+function isNicknameTaken(room, nickname, exceptSocketId) {
+  const wanted = nickname.toLowerCase();
+  for (const [id, name] of room.members) {
+    if (id !== exceptSocketId && name.toLowerCase() === wanted) return true;
+  }
+  return false;
 }
 
 function leaveCurrentRoom(socket) {
@@ -123,7 +142,7 @@ function leaveCurrentRoom(socket) {
     rooms.delete(code);
     console.log(`Room ${code} deleted (empty)`);
   } else {
-    io.to(code).emit("membersUpdate", [...room.members.values()]);
+    io.to(code).emit("membersUpdate", membersPayload(room));
   }
 }
 
@@ -147,7 +166,7 @@ io.on("connection", (socket) => {
     socket.join(code);
     socket.roomCode = code;
 
-    console.log(`Room ${code} created by ${nickname}`);
+    console.log(`Room ${code} created by ${nickname} (host)`);
     socket.emit("roomState", roomSnapshot(room));
   });
 
@@ -167,6 +186,17 @@ io.on("connection", (socket) => {
       });
     }
 
+    // Already in this room? Just resend the state.
+    if (socket.roomCode === code) {
+      return socket.emit("roomState", roomSnapshot(room));
+    }
+
+    if (isNicknameTaken(room, nickname, socket.id)) {
+      return socket.emit("roomError", {
+        message: `The nickname "${nickname}" is already taken in this room`,
+      });
+    }
+
     leaveCurrentRoom(socket);
 
     room.members.set(socket.id, nickname);
@@ -175,7 +205,7 @@ io.on("connection", (socket) => {
 
     console.log(`${nickname} joined room ${code}`);
     socket.emit("roomState", roomSnapshot(room));
-    socket.to(code).emit("membersUpdate", [...room.members.values()]);
+    socket.to(code).emit("membersUpdate", membersPayload(room));
   });
 
   socket.on("disconnect", () => {

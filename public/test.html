@@ -56,6 +56,12 @@
         $("log").prepend(line);
       }
 
+      function showMembers(members, host) {
+        $("members").textContent = members
+          .map((name) => (name === host ? name + " (host)" : name))
+          .join(", ");
+      }
+
       socket.on("connect", () => {
         $("status").textContent = "connected";
         log("Connected as " + socket.id);
@@ -69,12 +75,12 @@
 
       socket.on("roomState", (state) => {
         $("room").textContent = state.code;
-        $("members").textContent = state.members.join(", ");
+        showMembers(state.members, state.host);
         log("Joined room " + state.code);
       });
-      socket.on("membersUpdate", (members) => {
-        $("members").textContent = members.join(", ");
-        log("Members now: " + members.join(", "));
+      socket.on("membersUpdate", (data) => {
+        showMembers(data.members, data.host);
+        log("Members now: " + data.members.join(", "));
       });
       socket.on("roomError", (err) => log("Error: " + err.message, true));
 
