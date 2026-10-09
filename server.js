@@ -1,9 +1,14 @@
 const express = require("express");
+const http = require("http");
 const path = require("path");
 const fs = require("fs");
 const multer = require("multer");
+const { Server } = require("socket.io");
 
 const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
 const PORT = process.env.PORT || 3000;
 const MUSIC_DIR = path.join(__dirname, "music");
 fs.mkdirSync(MUSIC_DIR, { recursive: true });
@@ -49,16 +54,17 @@ app.post("/upload", (req, res) => {
     }
     if (err) return res.status(400).json({ ok: false, error: err.message });
     if (!req.file) {
-      return res.status(400).json({
-        ok: false,
-        error: 'No file uploaded (field name must be "song")',
-      });
+      return res
+        .status(400)
+        .json({
+          ok: false,
+          error: 'No file uploaded (field name must be "song")',
+        });
     }
     res.json({ ok: true, file: req.file.filename });
   });
 });
 
-// ---- Song list (B4) ----
 app.get("/songs", (req, res) => {
   const files = fs
     .readdirSync(MUSIC_DIR)
@@ -79,6 +85,17 @@ app.get("/songs", (req, res) => {
   res.json(songs);
 });
 
-app.listen(PORT, () => {
+// socket.io connection handling
+io.on("connection", (socket) => {
+  console.log(`Connected:    ${socket.id} (online: ${io.engine.clientsCount})`);
+  io.emit("onlineCount", io.engine.clientsCount);
+
+  socket.on("disconnect", () => {
+    console.log(`Disconnected: ${socket.id} (online: ${io.engine.clientsCount})`);
+    io.emit("onlineCount", io.engine.clientsCount);
+  });
+});
+
+server.listen(PORT, () => {
   console.log(`Wesync running at http://localhost:${PORT}`);
 });
