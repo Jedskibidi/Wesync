@@ -94,19 +94,26 @@ function validSongFile(value) {
 }
 
 app.get("/songs", (req, res) => {
-  const files = fs
-    .readdirSync(MUSIC_DIR)
-    .filter((f) => f.toLowerCase().endsWith(".mp3"));
+  try {
+    const files = fs
+      .readdirSync(MUSIC_DIR)
+      .filter((f) => f.toLowerCase().endsWith(".mp3"));
 
-  const songs = files
-    .map((file) => {
-      const added = fs.statSync(path.join(MUSIC_DIR, file)).mtimeMs;
-      return { file, title: songTitle(file), added };
-    })
-    .sort((a, b) => b.added - a.added)
-    .map(({ file, title }) => ({ file, title }));
+    const songs = files
+      .map((file) => {
+        const added = fs.statSync(path.join(MUSIC_DIR, file)).mtimeMs;
+        return { file, title: songTitle(file), added };
+      })
+      .sort((a, b) => b.added - a.added)
+      .map(({ file, title }) => ({ file, title }));
 
-  res.json(songs);
+    res.json(songs);
+  } catch (err) {
+    console.error("Could not read the music folder:", err);
+    res
+      .status(500)
+      .json({ ok: false, error: "Could not read the music folder" });
+  }
 });
 
 // Rooms (B6 + B7 + B8)
@@ -273,12 +280,31 @@ function cleanPosition(value) {
     : undefined;
 }
 
+// ---- Error handling (B16) ----
+
+// Listen for an event safely:
+//  - if the client sends something that is not an object (null, a string,
+//    a number...), we use an empty object instead
+//  - if the handler crashes, we tell the client and keep the server alive
+function handle(socket, event, handler) {
+  socket.on(event, (data) => {
+    try {
+      handler(data && typeof data === "object" ? data : {});
+    } catch (err) {
+      console.error(`Error in "${event}":`, err);
+      socket.emit("roomError", {
+        message: "Something went wrong on the server. Please try again.",
+      });
+    }
+  });
+}
+
 // socket.io connection handling
 io.on("connection", (socket) => {
   console.log(`Connected:    ${socket.id} (online: ${io.engine.clientsCount})`);
   io.emit("onlineCount", io.engine.clientsCount);
 
-  socket.on("createRoom", (data = {}) => {
+  handle(socket, "createRoom", (data) => {
     const nickname = cleanNickname(data.nickname);
     if (!nickname) {
       return socket.emit("roomError", { message: "Please enter a nickname" });
@@ -298,7 +324,7 @@ io.on("connection", (socket) => {
     socket.emit("roomState", roomSnapshot(room));
   });
 
-  socket.on("joinRoom", (data = {}) => {
+  handle(socket, "joinRoom", (data) => {
     const nickname = cleanNickname(data.nickname);
     const code = String(data.code || "")
       .trim()
@@ -307,11 +333,14 @@ io.on("connection", (socket) => {
     if (!nickname) {
       return socket.emit("roomError", { message: "Please enter a nickname" });
     }
+    if (!/^[A-Z0-9]{4}$/.test(code)) {
+      return socket.emit("roomError", {
+        message: "A room code has 4 letters or numbers",
+      });
+    }
     const room = rooms.get(code);
     if (!room) {
-      return socket.emit("roomError", {
-        message: `Room ${code || "?"} not found`,
-      });
+      return socket.emit("roomError", { message: `Room ${code} not found` });
     }
 
     // Already in this room? Just resend the state.
@@ -337,14 +366,14 @@ io.on("connection", (socket) => {
   });
 
   // Ask the server for the current room state
-  socket.on("getState", () => {
+  handle(socket, "getState", () => {
     const room = getRoomOf(socket);
     if (!room) return;
     socket.emit("roomState", roomSnapshot(room));
   });
 
   // play {position}  (position is optional)
-  socket.on("play", (data = {}) => {
+  handle(socket, "play", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
     if (!room.currentSong) {
@@ -358,7 +387,7 @@ io.on("connection", (socket) => {
   });
 
   // pause {position}  (position is optional)
-  socket.on("pause", (data = {}) => {
+  handle(socket, "pause", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
     updateRoom(room, {
@@ -369,7 +398,7 @@ io.on("connection", (socket) => {
   });
 
   // seek {position}  (B10)
-  socket.on("seek", (data = {}) => {
+  handle(socket, "seek", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
     const position = cleanPosition(data.position);
@@ -379,7 +408,7 @@ io.on("connection", (socket) => {
   });
 
   // changeSong {song}  (B11) - the new song starts paused at 0:00
-  socket.on("changeSong", (data = {}) => {
+  handle(socket, "changeSong", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
@@ -400,7 +429,7 @@ io.on("connection", (socket) => {
   // shared state, not an action, so there is no echo problem.)
 
   // addToQueue {song}
-  socket.on("addToQueue", (data = {}) => {
+  handle(socket, "addToQueue", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
@@ -419,7 +448,7 @@ io.on("connection", (socket) => {
   });
 
   // removeFromQueue {id}
-  socket.on("removeFromQueue", (data = {}) => {
+  handle(socket, "removeFromQueue", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
@@ -437,7 +466,7 @@ io.on("connection", (socket) => {
   // ---- Next, previous, auto-advance (B15) ----
 
   // next: play the first song in the queue
-  socket.on("next", () => {
+  handle(socket, "next", () => {
     const room = getRoomOf(socket);
     if (!room) return;
     if (!advanceQueue(room)) {
@@ -448,7 +477,7 @@ io.on("connection", (socket) => {
 
   // previous: go back to the last song that played.
   // The song we leave goes to the front of the queue, so "next" returns to it.
-  socket.on("previous", () => {
+  handle(socket, "previous", () => {
     const room = getRoomOf(socket);
     if (!room) return;
 
@@ -471,7 +500,7 @@ io.on("connection", (socket) => {
   // songEnded {song}: a client says its audio reached the end.
   // Every tab reports this at about the same time, so we only act on the
   // first report and ignore the rest.
-  socket.on("songEnded", (data = {}) => {
+  handle(socket, "songEnded", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
@@ -492,6 +521,29 @@ io.on("connection", (socket) => {
     );
     io.emit("onlineCount", io.engine.clientsCount);
   });
+});
+
+// Any error from an Express route (for example broken JSON in a request)
+// gets a clean JSON answer instead of an HTML error page.
+app.use((err, req, res, next) => {
+  console.error("Request error:", err);
+  const status = err.status && err.status < 500 ? err.status : 500;
+  res.status(status).json({
+    ok: false,
+    error: status < 500 ? "Bad request" : "Server error",
+  });
+});
+
+// Friendly message if the port is already taken (server started twice)
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other server (Ctrl+C in its terminal) and try again.`,
+    );
+  } else {
+    console.error("Server error:", err);
+  }
+  process.exit(1);
 });
 
 server.listen(PORT, () => {
