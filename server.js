@@ -16,6 +16,9 @@ fs.mkdirSync(MUSIC_DIR, { recursive: true });
 // How often every room sends a syncTick (B13), in milliseconds
 const TICK_INTERVAL_MS = 4000;
 
+// Most songs a room's queue can hold
+const MAX_QUEUE_LENGTH = 50;
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 app.use("/music", express.static(MUSIC_DIR));
@@ -66,6 +69,23 @@ app.post("/upload", (req, res) => {
   });
 });
 
+function songTitle(file) {
+  return path
+    .basename(file, path.extname(file))
+    .replace(/^\d{10,}-/, "")
+    .replace(/-/g, " ");
+}
+
+// Returns the clean file name if it is a real mp3 in music/, otherwise null.
+// basename() blocks tricks like "../server.js".
+function validSongFile(value) {
+  const file = path.basename(String(value || ""));
+  const ok =
+    file.toLowerCase().endsWith(".mp3") &&
+    fs.existsSync(path.join(MUSIC_DIR, file));
+  return ok ? file : null;
+}
+
 app.get("/songs", (req, res) => {
   const files = fs
     .readdirSync(MUSIC_DIR)
@@ -74,11 +94,7 @@ app.get("/songs", (req, res) => {
   const songs = files
     .map((file) => {
       const added = fs.statSync(path.join(MUSIC_DIR, file)).mtimeMs;
-      const title = path
-        .basename(file, path.extname(file))
-        .replace(/^\d{10,}-/, "")
-        .replace(/-/g, " ");
-      return { file, title, added };
+      return { file, title: songTitle(file), added };
     })
     .sort((a, b) => b.added - a.added)
     .map(({ file, title }) => ({ file, title }));
@@ -109,7 +125,8 @@ function createRoom(code, socketId, nickname) {
     isPlaying: false,
     position: 0,
     lastUpdated: Date.now(),
-    queue: [], // filled in B14
+    queue: [], // B14: items look like { id, file, title }
+    nextQueueId: 1, // B14: gives every queue item its own id
     tickTimer: null, // B13: the interval that sends syncTick
   };
 }
@@ -328,17 +345,53 @@ io.on("connection", (socket) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
-    // basename() blocks tricks like "../server.js"
-    const song = path.basename(String(data.song || ""));
-    const exists =
-      song.toLowerCase().endsWith(".mp3") &&
-      fs.existsSync(path.join(MUSIC_DIR, song));
-    if (!exists) {
+    const song = validSongFile(data.song);
+    if (!song) {
       return socket.emit("roomError", { message: "Song not found" });
     }
 
     updateRoom(room, { currentSong: song, isPlaying: false, position: 0 });
     socket.to(room.code).emit("changeSong", { song });
+  });
+
+  // ---- Queue (B14) ----
+  // Anyone in the room can add or remove. After every change we send the
+  // whole queue to EVERYONE in the room, including the sender. (This is
+  // shared state, not an action, so there is no echo problem.)
+
+  // addToQueue {song}
+  socket.on("addToQueue", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    const file = validSongFile(data.song);
+    if (!file) {
+      return socket.emit("roomError", { message: "Song not found" });
+    }
+    if (room.queue.length >= MAX_QUEUE_LENGTH) {
+      return socket.emit("roomError", {
+        message: `The queue is full (max ${MAX_QUEUE_LENGTH} songs)`,
+      });
+    }
+
+    room.queue.push({ id: room.nextQueueId++, file, title: songTitle(file) });
+    io.to(room.code).emit("queueUpdate", { queue: room.queue });
+  });
+
+  // removeFromQueue {id}
+  socket.on("removeFromQueue", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    const index = room.queue.findIndex((item) => item.id === data.id);
+    if (index === -1) {
+      return socket.emit("roomError", {
+        message: "That song is not in the queue",
+      });
+    }
+
+    room.queue.splice(index, 1);
+    io.to(room.code).emit("queueUpdate", { queue: room.queue });
   });
 
   socket.on("disconnect", () => {
