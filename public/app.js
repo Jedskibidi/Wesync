@@ -7,7 +7,7 @@
 //   currentTime, seek, duration, volume, joinOverlay, joinListening,
 //   dropZone, songFile, uploadStatus
 //
-// HTTP routes used: GET /songs, POST /upload (FormData field "file")
+// HTTP routes used: GET /songs, POST /upload (FormData field "song")
 //
 // Socket.IO events used:
 //   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
@@ -716,7 +716,11 @@ async function uploadFiles(fileList) {
   }
 
   // Refresh the library so the new songs show up in the dropdown
-  if (uploaded > 0) await loadSongs();
+  if (uploaded > 0) {
+    await loadSongs();
+    // Tell the song library (library.js) to reload its list too
+    document.dispatchEvent(new Event("songsChanged"));
+  }
 
   uploading = false;
   dropZone.classList.remove("is-busy");
@@ -766,6 +770,16 @@ dropZone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer.files));
 ["dragover", "drop"].forEach((name) => {
   window.addEventListener(name, (e) => e.preventDefault());
 });
-const libraryScript = document.createElement("script");
-   libraryScript.src = "library.js";
-   document.body.appendChild(libraryScript);
+
+// ---------- Start ----------
+
+// If the address has ?room=AB12, fill in the code and wait for a nickname
+readInviteFromUrl();
+
+// ---------- Extra features, each in its own file ----------
+// Each file loads on its own, so they cannot conflict with other work.
+["library.js", "roominfo.js"].forEach((file) => {
+  const script = document.createElement("script");
+  script.src = file;
+  document.body.appendChild(script);
+});
