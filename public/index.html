@@ -24,12 +24,15 @@
     <section id="player" hidden>
       <select id="songSelect"></select>
       <button id="setSong">Set song</button>
+      <button id="addToQueue">Add to queue</button>
 
       <audio id="audio" preload="auto"></audio>
 
       <div>
+        <button id="previous">Previous</button>
         <button id="play">Play</button>
         <button id="pause">Pause</button>
+        <button id="next">Next</button>
       </div>
 
       <div>
@@ -42,7 +45,15 @@
         Volume
         <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
       </div>
+
+      <h3>Up next</h3>
+      <ul id="queueList"></ul>
     </section>
+
+    <div id="joinOverlay" hidden>
+      <p>Music is already playing in this room.</p>
+      <button id="joinListening">Tap to join the listening</button>
+    </div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script src="app.js"></script>
