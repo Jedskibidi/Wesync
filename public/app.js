@@ -2,12 +2,13 @@
 //
 // IDs this file needs (keep them in index.html):
 //   status, message, nickname, create, code, join, room, members,
-//   player, songSelect, setSong, addToQueue, queueList, audio, play, pause,
+//   player, songSelect, setSong, addToQueue, queueList, audio,
+//   previous, play, pause, next,
 //   currentTime, seek, duration, volume, joinOverlay, joinListening
 //
 // Socket.IO events used:
 //   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
-//            addToQueue, removeFromQueue
+//            addToQueue, removeFromQueue, next, previous, songEnded
 //   receive: roomState, membersUpdate, roomError, play, pause, seek,
 //            changeSong, syncTick, queueUpdate
 
@@ -160,7 +161,7 @@ function syncAudioToRoom() {
   }
 }
 
-// ---------- Apply the full room state (join, create, getState) ----------
+// ---------- Apply the full room state (join, create, getState, next...) ----------
 
 function applyState(state) {
   inRoom = true;
@@ -304,6 +305,18 @@ $("pause").onclick = () => {
   socket.emit("pause", { position: audio.currentTime });
 };
 
+// Next and previous (B15): the server decides, then sends roomState to
+// everyone (including us), and applyState() loads and plays the new song.
+$("next").onclick = () => {
+  if (!inRoom) return;
+  socket.emit("next");
+};
+
+$("previous").onclick = () => {
+  if (!inRoom) return;
+  socket.emit("previous");
+};
+
 // Seek bar: "input" fires while dragging, "change" fires when released.
 $("seek").addEventListener("input", () => {
   isSeeking = true;
@@ -344,6 +357,11 @@ audio.addEventListener("timeupdate", updateTimeDisplay);
 
 // If sound is really playing, the overlay is not needed anymore.
 audio.addEventListener("playing", hideOverlay);
+audio.addEventListener("ended", () => {
+  if (inRoom && currentSong) {
+    socket.emit("songEnded", { song: currentSong });
+  }
+});
 
 fetch("/songs")
   .then((res) => res.json())

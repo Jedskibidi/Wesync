@@ -16,8 +16,14 @@ fs.mkdirSync(MUSIC_DIR, { recursive: true });
 // How often every room sends a syncTick (B13), in milliseconds
 const TICK_INTERVAL_MS = 4000;
 
-// Most songs a room's queue can hold
+// Most songs a room's queue can hold (B14)
 const MAX_QUEUE_LENGTH = 50;
+
+// How many played songs a room remembers for "previous" (B15)
+const MAX_HISTORY_LENGTH = 20;
+
+// Ignore "songEnded" this soon after a song change (B15)
+const SONG_END_GUARD_MS = 2000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -69,6 +75,7 @@ app.post("/upload", (req, res) => {
   });
 });
 
+// "1700000000000-Magnolia-Remix.mp3" -> "Magnolia Remix"
 function songTitle(file) {
   return path
     .basename(file, path.extname(file))
@@ -127,6 +134,8 @@ function createRoom(code, socketId, nickname) {
     lastUpdated: Date.now(),
     queue: [], // B14: items look like { id, file, title }
     nextQueueId: 1, // B14: gives every queue item its own id
+    history: [], // B15: file names of songs played before, oldest first
+    songChangedAt: 0, // B15: when the current song last changed (ms)
     tickTimer: null, // B13: the interval that sends syncTick
   };
 }
@@ -144,6 +153,35 @@ function updateRoom(room, changes) {
       ? changes.position
       : getCurrentPosition(room);
   Object.assign(room, changes, { position, lastUpdated: Date.now() });
+}
+
+// ---- Song changes and history (B15) ----
+
+// Remember the current song so "previous" can go back to it.
+function pushHistory(room) {
+  if (!room.currentSong) return;
+  room.history.push(room.currentSong);
+  if (room.history.length > MAX_HISTORY_LENGTH) room.history.shift();
+}
+
+// Make a song the current one and start it from 0:00 for everybody.
+function startSong(room, file) {
+  updateRoom(room, { currentSong: file, isPlaying: true, position: 0 });
+  room.songChangedAt = Date.now();
+}
+
+// Send the full room state to EVERYONE in the room, including the sender.
+function broadcastState(room) {
+  io.to(room.code).emit("roomState", roomSnapshot(room));
+}
+
+// Play the first queued song. Returns false if the queue is empty.
+function advanceQueue(room) {
+  const nextItem = room.queue.shift();
+  if (!nextItem) return false;
+  pushHistory(room);
+  startSong(room, nextItem.file);
+  return true;
 }
 
 // ---- Sync ticks (B13) ----
@@ -350,7 +388,9 @@ io.on("connection", (socket) => {
       return socket.emit("roomError", { message: "Song not found" });
     }
 
+    if (song !== room.currentSong) pushHistory(room); // B15
     updateRoom(room, { currentSong: song, isPlaying: false, position: 0 });
+    room.songChangedAt = Date.now();
     socket.to(room.code).emit("changeSong", { song });
   });
 
@@ -392,6 +432,57 @@ io.on("connection", (socket) => {
 
     room.queue.splice(index, 1);
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
+  });
+
+  // ---- Next, previous, auto-advance (B15) ----
+
+  // next: play the first song in the queue
+  socket.on("next", () => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+    if (!advanceQueue(room)) {
+      return socket.emit("roomError", { message: "The queue is empty" });
+    }
+    broadcastState(room);
+  });
+
+  // previous: go back to the last song that played.
+  // The song we leave goes to the front of the queue, so "next" returns to it.
+  socket.on("previous", () => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    const previousFile = room.history.pop();
+    if (!previousFile) {
+      return socket.emit("roomError", { message: "No previous song" });
+    }
+
+    if (room.currentSong) {
+      room.queue.unshift({
+        id: room.nextQueueId++,
+        file: room.currentSong,
+        title: songTitle(room.currentSong),
+      });
+    }
+    startSong(room, previousFile);
+    broadcastState(room);
+  });
+
+  // songEnded {song}: a client says its audio reached the end.
+  // Every tab reports this at about the same time, so we only act on the
+  // first report and ignore the rest.
+  socket.on("songEnded", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    if (!room.currentSong || data.song !== room.currentSong) return;
+    if (Date.now() - room.songChangedAt < SONG_END_GUARD_MS) return;
+
+    if (!advanceQueue(room)) {
+      // Nothing queued: stop at the start and wait
+      updateRoom(room, { isPlaying: false, position: 0 });
+    }
+    broadcastState(room);
   });
 
   socket.on("disconnect", () => {
