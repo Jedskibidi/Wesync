@@ -1,24 +1,3 @@
-// Wesync client: Socket.IO + audio player + sync + queue + error handling.
-//
-// IDs this file needs (keep them in index.html):
-//   status, message, nickname, nicknameError, create, code, codeError, join,
-//   inviteHint, roomSection, roomInfo, room, members,
-//   lcdTrack, lcdTime, npTitle, npPicker, playlist, addBtn, queueList, audio,
-//   previous, playPause, next,
-//   currentTime, seek, duration, volume, mute, joinOverlay, joinListening,
-//   dropZone, songFile, uploadStatus
-//
-// HTTP routes used: GET /songs, POST /upload (FormData field "song")
-//
-// Socket.IO events used:
-//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
-//            addToQueue, removeFromQueue, next, previous, songEnded
-//   receive: roomState, membersUpdate, roomError, play, pause, seek,
-//            changeSong, syncTick, queueUpdate
-//
-// "Picked by": the server can send the picker's nickname as `pickedBy` in
-// roomState, and as `by` in changeSong. If it does not, the line stays hidden.
-
 const socket = io();
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -39,6 +18,9 @@ let isSeeking = false; // true while the user drags the seek bar
 // What the room is doing, as last told by the server (or by our own buttons).
 let playback = { position: 0, isPlaying: false, receivedAt: performance.now() };
 let needsSync = false; // true while we wait for the audio file to load
+// true while the "tap to join the listening" overlay is up: a late joiner
+// must click once before any sound starts (browsers block autoplay)
+let waitingForClick = false;
 
 // Rejoin after a lost connection (B16)
 let submittedNickname = ""; // the nickname we last used to create/join
@@ -311,6 +293,7 @@ function clearSong() {
   currentSong = null;
   pickedBy = null;
   needsSync = false;
+  waitingForClick = false;
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
@@ -330,6 +313,11 @@ function seekTo(seconds) {
 }
 
 function playAudio() {
+  // A late joiner has not clicked yet: keep the overlay up, stay silent
+  if (waitingForClick) {
+    showOverlay();
+    return;
+  }
   audio.play().catch((err) => {
     if (err.name === "NotAllowedError") {
       // Browsers block sound until the user has clicked on the page.
@@ -355,13 +343,21 @@ function syncAudioToRoom() {
     playAudio();
   } else {
     audio.pause();
+    waitingForClick = false;
     hideOverlay();
   }
 }
 
 // ---------- Apply the full room state (join, create, getState, next...) ----------
 
-function applyState(state) {
+function applyState(state, justJoined = false) {
+  // Joining a room where music is already playing: ask for one click first.
+  // A paused room (or one with no song) needs no overlay.
+  if (justJoined && state.isPlaying && state.currentSong) {
+    waitingForClick = true;
+    showOverlay();
+  }
+
   inRoom = true;
   showRoomView();
   updateUrl(state.code);
@@ -403,6 +399,7 @@ socket.on("connect", () => {
 socket.on("disconnect", () => {
   $("status").textContent = "disconnected";
   inRoom = false;
+  waitingForClick = false;
   hideOverlay();
   audio.pause();
   updateControls();
@@ -422,12 +419,13 @@ socket.on("connect_error", () => {
 });
 
 socket.on("roomState", (state) => {
+  const justJoined = pendingAction === "join"; // the user pressed Join Room
   showMessage("");
   clearFieldErrors();
   rejoining = false;
   pendingAction = null;
   lastRoom = { code: state.code, nickname: submittedNickname };
-  applyState(state);
+  applyState(state, justJoined);
 });
 
 socket.on("membersUpdate", (data) => {
@@ -716,6 +714,9 @@ audio.addEventListener("volumechange", () => {
 // "Tap to join the listening": the tap allows sound, then we jump to
 // where the room is right now (not where it was when the overlay opened).
 $("joinListening").onclick = () => {
+  // This click is the user gesture the browser wants. Jump to where the room
+  // is right now (expectedPosition) and start the sound.
+  waitingForClick = false;
   hideOverlay();
   syncAudioToRoom();
 };
