@@ -80,7 +80,9 @@
 
     if (loadState === "loading") return setStatus("Loading songs...");
     if (loadState === "error") {
-      return setStatus("Could not load the song list. Press Refresh to try again.");
+      return setStatus(
+        "Could not load the song list. Press Refresh to try again.",
+      );
     }
     if (songs.length === 0) return setStatus("No songs yet, upload one!");
 
@@ -210,6 +212,7 @@
   socket.on("roomState", refreshVisibility);
   socket.on("disconnect", refreshVisibility);
   socket.on("roomError", refreshVisibility);
+  document.addEventListener("roomLeft", refreshVisibility);
 
   loadLibrary();
   refreshVisibility();

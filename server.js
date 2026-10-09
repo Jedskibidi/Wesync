@@ -513,6 +513,13 @@ io.on("connection", (socket) => {
     broadcastState(room);
   });
 
+  // leaveRoom: the user pressed "Leave room". Same cleanup as disconnecting
+  // (host passes on, empty rooms are deleted), but the socket stays connected.
+  handle(socket, "leaveRoom", () => {
+    leaveCurrentRoom(socket);
+    socket.emit("leftRoom");
+  });
+
   socket.on("disconnect", () => {
     leaveCurrentRoom(socket);
     console.log(
