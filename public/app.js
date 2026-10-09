@@ -609,3 +609,6 @@ fetch("/songs")
 // ---------- Start ----------
 
 readInviteFromUrl();
+const libraryScript = document.createElement("script");
+libraryScript.src = "library.js";
+document.body.appendChild(libraryScript);
