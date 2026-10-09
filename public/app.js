@@ -1,17 +1,3 @@
-// Wesync client: Socket.IO + audio player + sync + queue + error handling.
-//
-// IDs this file needs (keep them in index.html):
-//   status, message, nickname, create, code, join, room, members,
-//   player, songSelect, setSong, addToQueue, queueList, audio,
-//   previous, play, pause, next,
-//   currentTime, seek, duration, volume, joinOverlay, joinListening
-//
-// Socket.IO events used:
-//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong,
-//            addToQueue, removeFromQueue, next, previous, songEnded
-//   receive: roomState, membersUpdate, roomError, play, pause, seek,
-//            changeSong, syncTick, queueUpdate
-
 const socket = io();
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
@@ -21,6 +7,9 @@ const DRIFT_LIMIT_SECONDS = 0.3;
 
 // How long an error message stays on screen, in milliseconds
 const ERROR_VISIBLE_MS = 6000;
+
+// A room code is exactly 4 letters or numbers (same rule as the server)
+const ROOM_CODE_PATTERN = /^[A-Z0-9]{4}$/;
 
 let inRoom = false;
 let currentSong = null; // file name of the song loaded in the <audio>
@@ -34,6 +23,9 @@ let needsSync = false; // true while we wait for the audio file to load
 let submittedNickname = ""; // the nickname we last used to create/join
 let lastRoom = null; // { code, nickname } of the room we are in
 let rejoining = false; // true while we wait for the server to take us back
+
+// First screen: what we just asked the server to do ("create" or "join")
+let pendingAction = null;
 
 let messageTimer = null;
 
@@ -80,6 +72,67 @@ function showOverlay() {
 
 function hideOverlay() {
   $("joinOverlay").hidden = true;
+}
+
+// ---------- First screen: inline errors ----------
+
+// Show an error right under a field. field is "nickname" or "code".
+function showFieldError(field, text) {
+  const error = $(field + "Error");
+  error.textContent = text;
+  error.hidden = false;
+  $(field).setAttribute("aria-invalid", "true");
+}
+
+function clearFieldError(field) {
+  const error = $(field + "Error");
+  error.textContent = "";
+  error.hidden = true;
+  $(field).removeAttribute("aria-invalid");
+}
+
+function clearFieldErrors() {
+  clearFieldError("nickname");
+  clearFieldError("code");
+}
+
+// An error from the server while we are on the first screen:
+// put it under the field it is about.
+function showLandingError(text) {
+  if (/nickname/i.test(text)) {
+    showFieldError("nickname", text);
+  } else if (pendingAction === "join") {
+    showFieldError("code", text);
+  } else {
+    showError(text);
+  }
+}
+
+// ---------- First screen: which part of the page is visible ----------
+
+// Not in a room: only the create/join card
+function showLanding() {
+  $("roomSection").hidden = false;
+  $("roomInfo").hidden = true;
+  $("player").hidden = true;
+}
+
+// In a room: room info + player
+function showRoomView() {
+  $("roomSection").hidden = true;
+  $("inviteHint").hidden = true;
+  $("roomInfo").hidden = false;
+  $("player").hidden = false;
+}
+
+// Keep the address bar as an invite link: ?room=AB12
+function updateUrl(code) {
+  const wanted = "?room=" + code;
+  if (location.search !== wanted) history.replaceState(null, "", wanted);
+}
+
+function clearUrl() {
+  history.replaceState(null, "", location.pathname);
 }
 
 // ---------- Queue (F14) ----------
@@ -190,7 +243,8 @@ function syncAudioToRoom() {
 
 function applyState(state) {
   inRoom = true;
-  $("player").hidden = false;
+  showRoomView();
+  updateUrl(state.code);
   $("room").textContent = state.code;
   showMembers(state.members, state.host);
   renderQueue(state.queue);
@@ -226,11 +280,14 @@ socket.on("disconnect", () => {
   $("player").hidden = true;
   hideOverlay();
   audio.pause();
-  showMessage(
-    lastRoom
-      ? "Connection lost. Reconnecting..."
-      : "Disconnected. Create or join a room again.",
-  );
+
+  if (lastRoom) {
+    // We will try to rejoin automatically when the connection returns
+    showMessage("Connection lost. Reconnecting...");
+  } else {
+    showLanding();
+    showMessage("Disconnected. Create or join a room again.");
+  }
 });
 
 // The server could not be reached at all
@@ -240,7 +297,9 @@ socket.on("connect_error", () => {
 
 socket.on("roomState", (state) => {
   showMessage("");
+  clearFieldErrors();
   rejoining = false;
+  pendingAction = null;
   lastRoom = { code: state.code, nickname: submittedNickname };
   applyState(state);
 });
@@ -258,9 +317,19 @@ socket.on("roomError", (err) => {
     // The server did not take us back (for example the room is gone)
     rejoining = false;
     lastRoom = null;
+    clearUrl();
+    showLanding();
     showError(`Could not rejoin your room. ${err.message}`);
     return;
   }
+
+  // On the first screen, show the error under the field it is about
+  if (!inRoom && pendingAction) {
+    showLandingError(err.message);
+    pendingAction = null;
+    return;
+  }
+
   showError(err.message);
 });
 
@@ -309,26 +378,105 @@ socket.on("syncTick", ({ position, isPlaying }) => {
   }
 });
 
-// ---------- Our own buttons: change our audio AND tell the server ----------
+// ---------- First screen: create and join ----------
 
-$("create").onclick = () => {
+// Returns the trimmed nickname, or "" (after showing an error) if it is empty.
+function readNickname() {
+  const nickname = $("nickname").value.trim();
+  if (!nickname) {
+    showFieldError("nickname", "Please enter a nickname");
+    return "";
+  }
+  return nickname;
+}
+
+// Returns the cleaned room code, or "" (after showing an error) if invalid.
+function readCode() {
+  const code = $("code").value.trim().toUpperCase();
+  $("code").value = code;
+  if (!code) {
+    showFieldError("code", "Please enter the room code");
+    return "";
+  }
+  if (!ROOM_CODE_PATTERN.test(code)) {
+    showFieldError("code", "A room code has 4 letters or numbers");
+    return "";
+  }
+  return code;
+}
+
+function startCreate() {
+  clearFieldErrors();
   showMessage("");
+
+  const nickname = readNickname();
+  if (!nickname) return $("nickname").focus();
+
   lastRoom = null;
   rejoining = false;
-  submittedNickname = $("nickname").value;
-  socket.emit("createRoom", { nickname: submittedNickname });
-};
+  pendingAction = "create";
+  submittedNickname = nickname;
+  socket.emit("createRoom", { nickname });
+}
 
-$("join").onclick = () => {
+function startJoin() {
+  clearFieldErrors();
   showMessage("");
+
+  // Check both fields first, so both errors can show at once
+  const nickname = readNickname();
+  const code = readCode();
+  if (!nickname) return $("nickname").focus();
+  if (!code) return $("code").focus();
+
   lastRoom = null;
   rejoining = false;
-  submittedNickname = $("nickname").value;
-  socket.emit("joinRoom", {
-    code: $("code").value,
-    nickname: submittedNickname,
-  });
-};
+  pendingAction = "join";
+  submittedNickname = nickname;
+  socket.emit("joinRoom", { code, nickname });
+}
+
+$("create").onclick = startCreate;
+$("join").onclick = startJoin;
+
+// Enter in the nickname box: join if a code is filled in, otherwise create.
+$("nickname").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if ($("code").value.trim()) startJoin();
+  else startCreate();
+});
+
+// Enter in the code box: join
+$("code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startJoin();
+});
+
+// Typing in a field removes its error
+$("nickname").addEventListener("input", () => clearFieldError("nickname"));
+$("code").addEventListener("input", () => {
+  $("code").value = $("code").value.toUpperCase();
+  clearFieldError("code");
+});
+
+// Invite link: /?room=AB12 fills in the code and waits for a nickname
+function readInviteFromUrl() {
+  const raw = new URLSearchParams(location.search).get("room");
+  if (raw === null) return;
+
+  const code = raw.trim().toUpperCase();
+  if (!ROOM_CODE_PATTERN.test(code)) {
+    showFieldError("code", "That invite link has an invalid room code");
+    return;
+  }
+
+  $("code").value = code;
+  $("inviteHint").textContent =
+    `You've been invited to room ${code}. Enter a nickname and press Join Room.`;
+  $("inviteHint").hidden = false;
+  $("nickname").focus();
+}
+
+// ---------- Player buttons: change our audio AND tell the server ----------
 
 $("setSong").onclick = () => {
   const song = $("songSelect").value;
@@ -457,3 +605,7 @@ fetch("/songs")
   .catch(() => {
     showError("Could not load the song list. Try refreshing the page.");
   });
+
+// ---------- Start ----------
+
+readInviteFromUrl();
