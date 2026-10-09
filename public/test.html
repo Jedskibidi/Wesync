@@ -1,30 +1,92 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
     <title>Wesync Socket Test</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        max-width: 520px;
+        margin: 24px auto;
+      }
+      input,
+      button {
+        padding: 6px 10px;
+        margin: 2px;
+      }
+      #log {
+        background: #f3f3f3;
+        padding: 8px;
+        height: 180px;
+        overflow: auto;
+        font-size: 13px;
+      }
+      .err {
+        color: #b00020;
+      }
+    </style>
   </head>
   <body>
     <h1>Socket.IO test</h1>
-    <p>Status: <b id="status">connecting...</b></p>
-    <p>My socket id: <b id="id">-</b></p>
-    <p>People online: <b id="count">-</b></p>
+    <p>
+      Status: <b id="status">connecting...</b> | Online: <b id="count">-</b>
+    </p>
+
+    <h3>Room</h3>
+    <input id="nickname" placeholder="Nickname" />
+    <br />
+    <button id="create">Create Room</button>
+    <input id="code" placeholder="Room code" size="8" />
+    <button id="join">Join Room</button>
+
+    <p>Current room: <b id="room">none</b></p>
+    <p>Members: <b id="members">-</b></p>
+
+    <h3>Log</h3>
+    <div id="log"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
       const socket = io();
+      const $ = (id) => document.getElementById(id);
+
+      function log(text, isError) {
+        const line = document.createElement("div");
+        line.textContent = text;
+        if (isError) line.className = "err";
+        $("log").prepend(line);
+      }
 
       socket.on("connect", () => {
-        document.getElementById("status").textContent = "connected";
-        document.getElementById("id").textContent = socket.id;
+        $("status").textContent = "connected";
+        log("Connected as " + socket.id);
       });
-
       socket.on("disconnect", () => {
-        document.getElementById("status").textContent = "disconnected";
+        $("status").textContent = "disconnected";
+      });
+      socket.on("onlineCount", (n) => {
+        $("count").textContent = n;
       });
 
-      socket.on("onlineCount", (n) => {
-        document.getElementById("count").textContent = n;
+      socket.on("roomState", (state) => {
+        $("room").textContent = state.code;
+        $("members").textContent = state.members.join(", ");
+        log("Joined room " + state.code);
       });
+      socket.on("membersUpdate", (members) => {
+        $("members").textContent = members.join(", ");
+        log("Members now: " + members.join(", "));
+      });
+      socket.on("roomError", (err) => log("Error: " + err.message, true));
+
+      $("create").onclick = () => {
+        socket.emit("createRoom", { nickname: $("nickname").value });
+      };
+      $("join").onclick = () => {
+        socket.emit("joinRoom", {
+          code: $("code").value,
+          nickname: $("nickname").value,
+        });
+      };
     </script>
   </body>
 </html>
