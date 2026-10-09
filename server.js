@@ -1,12 +1,64 @@
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
+const multer = require("multer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MUSIC_DIR = path.join(__dirname, "music");
+fs.mkdirSync(MUSIC_DIR, { recursive: true });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/music", express.static(path.join(__dirname, "music")));
+app.use("/music", express.static(MUSIC_DIR));
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, MUSIC_DIR),
+  filename: (req, file, cb) => {
+    const base =
+      path
+        .basename(file.originalname, path.extname(file.originalname))
+        .replace(/[^a-zA-Z0-9 _-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-") || "song";
+    cb(null, `${Date.now()}-${base}.mp3`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const okTypes = ["audio/mpeg", "audio/mp3", "application/octet-stream", ""];
+    if (ext !== ".mp3" || !okTypes.includes(file.mimetype)) {
+      return cb(new Error("Only MP3 files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+app.post("/upload", (req, res) => {
+  upload.single("song")(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      const msg =
+        err.code === "LIMIT_FILE_SIZE"
+          ? "File too large (max 20 MB)"
+          : err.message;
+      return res.status(400).json({ ok: false, error: msg });
+    }
+    if (err) return res.status(400).json({ ok: false, error: err.message });
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({
+          ok: false,
+          error: 'No file uploaded (field name must be "song")',
+        });
+    }
+    res.json({ ok: true, file: req.file.filename });
+  });
+});
 
 app.listen(PORT, () => {
   console.log(`Wesync running at http://localhost:${PORT}`);
