@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Wesync Socket Test</title>
+  </head>
+  <body>
+    <h1>Socket.IO test</h1>
+    <p>Status: <b id="status">connecting...</b></p>
+    <p>My socket id: <b id="id">-</b></p>
+    <p>People online: <b id="count">-</b></p>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+
+      socket.on("connect", () => {
+        document.getElementById("status").textContent = "connected";
+        document.getElementById("id").textContent = socket.id;
+      });
+
+      socket.on("disconnect", () => {
+        document.getElementById("status").textContent = "disconnected";
+      });
+
+      socket.on("onlineCount", (n) => {
+        document.getElementById("count").textContent = n;
+      });
+    </script>
+  </body>
+</html>
