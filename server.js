@@ -98,13 +98,11 @@ function generateRoomCode() {
   return code;
 }
 
-// ---- Room state (B8) ----
-// position is in seconds. lastUpdated is when position was last set (ms).
 function createRoom(code, socketId, nickname) {
   return {
     code,
     members: new Map([[socketId, nickname]]),
-    currentSong: null, // file name, for example "Magnolia.mp3"
+    currentSong: null,
     isPlaying: false,
     position: 0,
     lastUpdated: Date.now(),
@@ -119,8 +117,6 @@ function getCurrentPosition(room) {
   return Math.max(0, room.position + elapsedSeconds);
 }
 
-// Apply changes. If no position is given, freeze the current one first,
-// so pausing or changing songs never makes the position jump.
 function updateRoom(room, changes) {
   const position =
     changes.position !== undefined
@@ -181,6 +177,20 @@ function leaveCurrentRoom(socket) {
   } else {
     io.to(code).emit("membersUpdate", membersPayload(room));
   }
+}
+
+// Returns the room the socket is in, or tells the client it is not in one.
+function getRoomOf(socket) {
+  const room = rooms.get(socket.roomCode);
+  if (!room) socket.emit("roomError", { message: "You are not in a room" });
+  return room;
+}
+
+// Returns the position if it is a valid number, otherwise undefined.
+function cleanPosition(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, value)
+    : undefined;
 }
 
 // socket.io connection handling
@@ -247,30 +257,63 @@ io.on("connection", (socket) => {
 
   // Ask the server for the current room state
   socket.on("getState", () => {
-    const room = rooms.get(socket.roomCode);
-    if (!room) {
-      return socket.emit("roomError", { message: "You are not in a room" });
-    }
+    const room = getRoomOf(socket);
+    if (!room) return;
     socket.emit("roomState", roomSnapshot(room));
   });
 
-  // TEMPORARY: lets test.html change the state before B9 to B11 exist.
-  // Remove this in B9.
-  socket.on("debugSetState", (data = {}) => {
-    const room = rooms.get(socket.roomCode);
-    if (!room) {
-      return socket.emit("roomError", { message: "You are not in a room" });
+
+  // play {position}  (position is optional)
+  socket.on("play", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+    if (!room.currentSong) {
+      return socket.emit("roomError", { message: "Pick a song first" });
+    }
+    updateRoom(room, {
+      isPlaying: true,
+      position: cleanPosition(data.position),
+    });
+    socket.to(room.code).emit("play", { position: room.position });
+  });
+
+  // pause {position}  (position is optional)
+  socket.on("pause", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+    updateRoom(room, {
+      isPlaying: false,
+      position: cleanPosition(data.position),
+    });
+    socket.to(room.code).emit("pause", { position: room.position });
+  });
+
+  // seek {position}  (B10)
+  socket.on("seek", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+    const position = cleanPosition(data.position);
+    if (position === undefined) return;
+    updateRoom(room, { position });
+    socket.to(room.code).emit("seek", { position: room.position });
+  });
+
+  // changeSong {song}  (B11) - the new song starts paused at 0:00
+  socket.on("changeSong", (data = {}) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    // basename() blocks tricks like "../server.js"
+    const song = path.basename(String(data.song || ""));
+    const exists =
+      song.toLowerCase().endsWith(".mp3") &&
+      fs.existsSync(path.join(MUSIC_DIR, song));
+    if (!exists) {
+      return socket.emit("roomError", { message: "Song not found" });
     }
 
-    const changes = {};
-    if (data.song !== undefined) changes.currentSong = data.song;
-    if (typeof data.isPlaying === "boolean") changes.isPlaying = data.isPlaying;
-    if (typeof data.position === "number") {
-      changes.position = Math.max(0, data.position);
-    }
-
-    updateRoom(room, changes);
-    io.to(room.code).emit("roomState", roomSnapshot(room));
+    updateRoom(room, { currentSong: song, isPlaying: false, position: 0 });
+    socket.to(room.code).emit("changeSong", { song });
   });
 
   socket.on("disconnect", () => {

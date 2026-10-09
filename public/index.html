@@ -1,5 +1,50 @@
-<!DOCTYPE html>
-<html>
-  <head><title>Wesync</title></head>
-  <body><h1>It works!</h1></body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Wesync</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>Wesync</h1>
+    <p>Status: <span id="status">connecting...</span></p>
+    <p id="message"></p>
+
+    <section id="roomSection">
+      <input id="nickname" placeholder="Nickname" />
+      <button id="create">Create Room</button>
+      <input id="code" placeholder="Room code" size="6" maxlength="4" />
+      <button id="join">Join Room</button>
+
+      <p>Room: <b id="room">none</b></p>
+      <p>Members: <span id="members">-</span></p>
+    </section>
+
+    <section id="player" hidden>
+      <select id="songSelect"></select>
+      <button id="setSong">Set song</button>
+
+      <audio id="audio" preload="auto"></audio>
+
+      <div>
+        <button id="play">Play</button>
+        <button id="pause">Pause</button>
+      </div>
+
+      <div>
+        <span id="currentTime">0:00</span>
+        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" />
+        <span id="duration">0:00</span>
+      </div>
+
+      <div>
+        Volume
+        <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
+      </div>
+    </section>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+  </body>
 </html>
