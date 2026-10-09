@@ -766,3 +766,6 @@ dropZone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer.files));
 ["dragover", "drop"].forEach((name) => {
   window.addEventListener(name, (e) => e.preventDefault());
 });
+const libraryScript = document.createElement("script");
+   libraryScript.src = "library.js";
+   document.body.appendChild(libraryScript);
