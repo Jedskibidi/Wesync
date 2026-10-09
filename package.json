@@ -4,9 +4,9 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-  "start": "node server.js",
-  "dev": "node --watch server.js"
-},
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -15,5 +15,13 @@
     "express": "^5.2.1",
     "multer": "^2.4.0",
     "socket.io": "^4.8.4"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jedskibidi/Wesync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Jedskibidi/Wesync/issues"
+  },
+  "homepage": "https://github.com/Jedskibidi/Wesync#readme"
 }

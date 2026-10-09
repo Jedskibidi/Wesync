@@ -1,11 +1,27 @@
+// Wesync client: Socket.IO + audio player + sync.
+//
+// IDs this file needs (keep them in index.html):
+//   status, message, nickname, create, code, join, room, members,
+//   player, songSelect, setSong, audio, play, pause,
+//   currentTime, seek, duration, volume, joinOverlay, joinListening
+//
+// Socket.IO events used:
+//   send:    createRoom, joinRoom, getState, play, pause, seek, changeSong
+//   receive: roomState, membersUpdate, roomError, play, pause, seek, changeSong
+
 const socket = io();
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 
 let inRoom = false;
-let currentSong = null; 
-let isSeeking = false; 
+let currentSong = null; // file name of the song loaded in the <audio>
+let isSeeking = false; // true while the user drags the seek bar
 
+// What the room is doing, as last told by the server (or by our own buttons).
+let playback = { position: 0, isPlaying: false, receivedAt: performance.now() };
+let needsSync = false; // true while we wait for the audio file to load
+
+// ---------- Small helpers ----------
 
 function formatTime(seconds) {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -32,7 +48,28 @@ function updateTimeDisplay() {
   );
 }
 
-// Audio element control functions
+function showOverlay() {
+  $("joinOverlay").hidden = false;
+}
+
+function hideOverlay() {
+  $("joinOverlay").hidden = true;
+}
+
+// ---------- Room playback memory ----------
+
+function remember(position, isPlaying) {
+  playback = { position, isPlaying, receivedAt: performance.now() };
+}
+
+// While the room is playing, time keeps moving since we last heard about it.
+function expectedPosition() {
+  if (!playback.isPlaying) return playback.position;
+  return playback.position + (performance.now() - playback.receivedAt) / 1000;
+}
+
+// ---------- Audio actions (these never send anything to the server) ----------
+
 function loadSong(file) {
   currentSong = file;
   audio.src = "/music/" + encodeURIComponent(file);
@@ -46,6 +83,7 @@ function loadSong(file) {
 
 function clearSong() {
   currentSong = null;
+  needsSync = false;
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
@@ -55,34 +93,57 @@ function clearSong() {
 }
 
 function seekTo(seconds) {
-  audio.currentTime = seconds;
+  const max = Number.isFinite(audio.duration) ? audio.duration : seconds;
+  audio.currentTime = Math.min(Math.max(0, seconds), max);
 }
 
 function playAudio() {
-  audio.play().catch(() => {
-    showMessage("Your browser blocked autoplay. Press Play.");
+  audio.play().catch((err) => {
+    // Browsers block sound until the user has clicked on the page.
+    if (err.name === "NotAllowedError") showOverlay();
   });
 }
 
-// Full room state is sent to new members, and also when the host changes songs or pauses/plays/seeks. The client applies it to its UI and audio element.
+// Put our audio where the room is right now. If the file has not loaded
+// yet, wait: the "loadedmetadata" event below finishes the job.
+function syncAudioToRoom() {
+  if (!currentSong) return;
+  if (audio.readyState < 1) {
+    needsSync = true;
+    return;
+  }
+  needsSync = false;
+  seekTo(expectedPosition());
+  if (playback.isPlaying) {
+    playAudio();
+  } else {
+    audio.pause();
+    hideOverlay();
+  }
+}
+
+// ---------- Apply the full room state (join, create, getState) ----------
+
 function applyState(state) {
   inRoom = true;
   $("player").hidden = false;
   $("room").textContent = state.code;
   showMembers(state.members, state.host);
 
+  remember(state.position, state.isPlaying);
+
   if (!state.currentSong) {
     clearSong();
+    hideOverlay();
     return;
   }
 
   if (state.currentSong !== currentSong) loadSong(state.currentSong);
-  seekTo(state.position);
-  if (state.isPlaying) playAudio();
-  else audio.pause();
+  syncAudioToRoom();
 }
 
-// Message handlers sa server
+// ---------- Messages from the server ----------
+
 socket.on("connect", () => {
   $("status").textContent = "connected";
 });
@@ -91,6 +152,7 @@ socket.on("disconnect", () => {
   $("status").textContent = "disconnected";
   inRoom = false;
   $("player").hidden = true;
+  hideOverlay();
   audio.pause();
   showMessage("Disconnected. Create or join a room again.");
 });
@@ -108,25 +170,31 @@ socket.on("roomError", (err) => {
   showMessage(err.message);
 });
 
+// Someone else pressed a button. We only change our own audio here.
+// We do NOT send anything back, so no echo loops are possible.
 socket.on("play", ({ position }) => {
-  seekTo(position);
-  playAudio();
+  remember(position, true);
+  syncAudioToRoom();
 });
 
 socket.on("pause", ({ position }) => {
-  audio.pause();
-  seekTo(position);
+  remember(position, false);
+  syncAudioToRoom();
 });
 
 socket.on("seek", ({ position }) => {
-  seekTo(position);
+  remember(position, playback.isPlaying);
+  syncAudioToRoom();
 });
 
 socket.on("changeSong", ({ song }) => {
   loadSong(song);
+  remember(0, false);
+  syncAudioToRoom(); // the file is still loading, so this waits for metadata
 });
 
-// Own buttons
+// ---------- Our own buttons: change our audio AND tell the server ----------
+
 $("create").onclick = () => {
   showMessage("");
   socket.emit("createRoom", { nickname: $("nickname").value });
@@ -144,12 +212,15 @@ $("setSong").onclick = () => {
   const song = $("songSelect").value;
   if (!inRoom || !song) return;
   loadSong(song);
+  remember(0, false);
+  needsSync = true;
   socket.emit("changeSong", { song });
 };
 
 $("play").onclick = () => {
   if (!inRoom) return;
   if (!currentSong) return showMessage("Pick a song first");
+  remember(audio.currentTime, true);
   playAudio();
   socket.emit("play", { position: audio.currentTime });
 };
@@ -157,6 +228,7 @@ $("play").onclick = () => {
 $("pause").onclick = () => {
   if (!inRoom) return;
   audio.pause();
+  remember(audio.currentTime, false);
   socket.emit("pause", { position: audio.currentTime });
 };
 
@@ -170,6 +242,7 @@ $("seek").addEventListener("change", () => {
   isSeeking = false;
   if (!inRoom || !currentSong) return;
   const position = Number($("seek").value);
+  remember(position, playback.isPlaying);
   seekTo(position);
   socket.emit("seek", { position });
 });
@@ -179,14 +252,28 @@ $("volume").addEventListener("input", () => {
   audio.volume = Number($("volume").value);
 });
 
-//update the seek bar and time display 
+// "Tap to join the listening": the tap allows sound, then we jump to
+// where the room is right now (not where it was when the overlay opened).
+$("joinListening").onclick = () => {
+  hideOverlay();
+  syncAudioToRoom();
+};
+
+// ---------- Audio element events ----------
+
 audio.addEventListener("loadedmetadata", () => {
   $("seek").max = audio.duration;
   $("duration").textContent = formatTime(audio.duration);
   updateTimeDisplay();
+  if (needsSync) syncAudioToRoom();
 });
 
 audio.addEventListener("timeupdate", updateTimeDisplay);
+
+// If sound is really playing, the overlay is not needed anymore.
+audio.addEventListener("playing", hideOverlay);
+
+// ---------- Song list ----------
 
 fetch("/songs")
   .then((res) => res.json())
