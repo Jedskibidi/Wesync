@@ -62,10 +62,16 @@
       <!-- Shown after you are in a room (roominfo.js adds the member count,
            "Copy invite link" and "Leave room" to this card) -->
       <section id="roomInfo" class="room card" aria-label="Room info" hidden>
-        <p class="room-info">
-          Room: <b id="room">none</b> &nbsp;|&nbsp; Members:
-          <span id="members">-</span>
-        </p>
+        <p class="room-info">Room: <b id="room">none</b></p>
+
+        <!-- Who is in the room (filled in by showMembers() in app.js) -->
+        <div id="memberPanel" class="member-panel" aria-label="Members">
+          <div class="member-head">
+            <h3>Members</h3>
+            <span id="memberCount" class="member-count">0</span>
+          </div>
+          <ul id="memberList" class="member-list"></ul>
+        </div>
       </section>
 
       <div class="layout">
@@ -186,7 +192,14 @@
     </main>
 
     <div id="joinOverlay" class="overlay" hidden>
-      <div class="card">
+      <div
+        class="card overlay-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="overlayTitle"
+      >
+        <span class="spr spr-bee overlay-bee" role="img" aria-label="Bee"></span>
+        <h2 id="overlayTitle">Join the listening</h2>
         <p>Music is already playing in this room.</p>
         <button id="joinListening" class="btn">
           Tap to join the listening

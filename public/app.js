@@ -75,10 +75,55 @@ function showError(text) {
   }, ERROR_VISIBLE_MS);
 }
 
+const AVATAR_COLORS = ["#f7b731", "#f29a8e", "#ffd966", "#dda66a"];
+
+function avatarColor(name) {
+  let sum = 0;
+  for (const ch of name) sum += ch.codePointAt(0);
+  return AVATAR_COLORS[sum % AVATAR_COLORS.length];
+}
+
 function showMembers(members, host) {
-  $("members").textContent = members
-    .map((name) => (name === host ? `${name} (host)` : name))
-    .join(", ");
+  const list = $("memberList");
+  list.innerHTML = "";
+  $("memberCount").textContent = members.length;
+
+  // Host first, everybody else in the order the server sent them
+  const ordered = [...members].sort(
+    (a, b) => Number(b === host) - Number(a === host),
+  );
+
+  ordered.forEach((name) => {
+    const isYou = name === submittedNickname;
+    const isHost = name === host;
+
+    const row = document.createElement("li");
+    row.className = "member" + (isYou ? " is-you" : "");
+
+    const avatar = document.createElement("span");
+    avatar.className = "member-avatar";
+    avatar.style.background = avatarColor(name);
+    avatar.textContent = Array.from(name)[0]?.toUpperCase() || "?";
+    avatar.setAttribute("aria-hidden", "true");
+
+    const label = document.createElement("span");
+    label.className = "member-name";
+    label.textContent = name;
+
+    row.append(avatar, label);
+
+    if (isYou) row.appendChild(makeTag("You", "tag-you"));
+    if (isHost) row.appendChild(makeTag("Host", "tag-host"));
+
+    list.appendChild(row);
+  });
+}
+
+function makeTag(text, className) {
+  const tag = document.createElement("span");
+  tag.className = "member-tag " + className;
+  tag.textContent = text;
+  return tag;
 }
 
 function showOverlay() {
@@ -130,6 +175,7 @@ function showLandingError(text) {
 function showLanding() {
   $("roomSection").hidden = false;
   $("roomInfo").hidden = true;
+  $("memberPanel").hidden = true;
 }
 
 // In a room: show the room card (member count, copy link, leave)
@@ -137,6 +183,7 @@ function showRoomView() {
   $("roomSection").hidden = true;
   $("inviteHint").hidden = true;
   $("roomInfo").hidden = false;
+  $("memberPanel").hidden = false;
 }
 
 // Keep the address bar as an invite link: ?room=AB12
