@@ -7,48 +7,99 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>Wesync</h1>
-    <p>Status: <span id="status">connecting...</span></p>
-    <p id="message"></p>
+    <main class="app">
+      <header class="app-head">
+        <h1>Wesync</h1>
+        <p class="status">Status: <span id="status">connecting...</span></p>
+      </header>
 
-    <section id="roomSection">
-      <input id="nickname" placeholder="Nickname" />
-      <button id="create">Create Room</button>
-      <input id="code" placeholder="Room code" size="6" maxlength="4" />
-      <button id="join">Join Room</button>
+      <p id="message" class="message"></p>
 
-      <p>Room: <b id="room">none</b></p>
-      <p>Members: <span id="members">-</span></p>
-    </section>
+      <!-- First screen: start or join a listening room -->
+      <section id="roomSection" class="card room">
+        <h2>Listen together</h2>
+        <p id="inviteHint" class="room-info" hidden></p>
 
-    <section id="player" hidden>
-      <select id="songSelect"></select>
-      <button id="setSong">Set song</button>
-      <button id="addToQueue">Add to queue</button>
+        <div>
+          <label class="label" for="nickname">Your nickname</label>
+          <input
+            id="nickname"
+            class="input"
+            maxlength="20"
+            autocomplete="off"
+            aria-describedby="nicknameError"
+          />
+          <p id="nicknameError" class="error-text" role="alert" hidden></p>
+        </div>
 
-      <audio id="audio" preload="auto"></audio>
+        <button id="create" class="btn btn-primary" type="button">
+          Create Room
+        </button>
 
-      <div>
-        <button id="previous">Previous</button>
-        <button id="play">Play</button>
-        <button id="pause">Pause</button>
-        <button id="next">Next</button>
-      </div>
+        <p class="room-info">or join a friend's room</p>
 
-      <div>
-        <span id="currentTime">0:00</span>
-        <input id="seek" type="range" min="0" max="0" step="0.1" value="0" />
-        <span id="duration">0:00</span>
-      </div>
+        <div>
+          <label class="label" for="code">Room code</label>
+          <div class="field-row">
+            <input
+              id="code"
+              class="input code-input"
+              maxlength="4"
+              autocomplete="off"
+              autocapitalize="characters"
+              spellcheck="false"
+              aria-describedby="codeError"
+            />
+            <button id="join" class="btn btn-secondary" type="button">
+              Join Room
+            </button>
+          </div>
+          <p id="codeError" class="error-text" role="alert" hidden></p>
+        </div>
+      </section>
 
-      <div>
-        Volume
-        <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
-      </div>
+      <!-- Shown after you are in a room -->
+      <section id="roomInfo" class="card room" hidden>
+        <p class="room-info">Room: <b id="room">none</b></p>
+        <p class="room-info">Members: <span id="members">-</span></p>
+      </section>
 
-      <h3>Up next</h3>
-      <ul id="queueList"></ul>
-    </section>
+      <section id="player" hidden>
+        <select id="songSelect"></select>
+        <button id="setSong">Set song</button>
+        <button id="addToQueue">Add to queue</button>
+
+        <audio id="audio" preload="auto"></audio>
+
+        <div>
+          <button id="previous">Previous</button>
+          <button id="play">Play</button>
+          <button id="pause">Pause</button>
+          <button id="next">Next</button>
+        </div>
+
+        <div>
+          <span id="currentTime">0:00</span>
+          <input id="seek" type="range" min="0" max="0" step="0.1" value="0" />
+          <span id="duration">0:00</span>
+        </div>
+
+        <div>
+          Volume
+          <input
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+          />
+        </div>
+
+        <h3>Up next</h3>
+        <ul id="queueList"></ul>
+      </section>
+    </main>
 
     <div id="joinOverlay" hidden>
       <p>Music is already playing in this room.</p>
