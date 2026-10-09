@@ -135,12 +135,13 @@ function createRoom(code, socketId, nickname) {
     code,
     members: new Map([[socketId, nickname]]),
     currentSong: null,
+    pickedBy: null, // nickname of whoever picked the current song
     isPlaying: false,
     position: 0,
     lastUpdated: Date.now(),
-    queue: [], // B14: items look like { id, file, title }
+    queue: [], // B14: items look like { id, file, title, by }
     nextQueueId: 1, // B14: gives every queue item its own id
-    history: [], // B15: file names of songs played before, oldest first
+    history: [], // B15: songs played before, oldest first: { file, by }
     songChangedAt: 0, // B15: when the current song last changed (ms)
     tickTimer: null, // B13: the interval that sends syncTick
   };
@@ -163,16 +164,22 @@ function updateRoom(room, changes) {
 
 // ---- Song changes and history (B15) ----
 
-// Remember the current song so "previous" can go back to it.
+// Remember the current song (and who picked it) so "previous" can go back.
 function pushHistory(room) {
   if (!room.currentSong) return;
-  room.history.push(room.currentSong);
+  room.history.push({ file: room.currentSong, by: room.pickedBy });
   if (room.history.length > MAX_HISTORY_LENGTH) room.history.shift();
 }
 
 // Make a song the current one and start it from 0:00 for everybody.
-function startSong(room, file) {
-  updateRoom(room, { currentSong: file, isPlaying: true, position: 0 });
+// "by" is the nickname of whoever picked it.
+function startSong(room, file, by) {
+  updateRoom(room, {
+    currentSong: file,
+    pickedBy: by || null,
+    isPlaying: true,
+    position: 0,
+  });
   room.songChangedAt = Date.now();
 }
 
@@ -182,11 +189,12 @@ function broadcastState(room) {
 }
 
 // Play the first queued song. Returns false if the queue is empty.
+// The song's picker is whoever added it to the queue.
 function advanceQueue(room) {
   const nextItem = room.queue.shift();
   if (!nextItem) return false;
   pushHistory(room);
-  startSong(room, nextItem.file);
+  startSong(room, nextItem.file, nextItem.by);
   return true;
 }
 
@@ -224,6 +232,7 @@ function roomSnapshot(room) {
     code: room.code,
     ...membersPayload(room),
     currentSong: room.currentSong,
+    pickedBy: room.pickedBy,
     isPlaying: room.isPlaying,
     position: getCurrentPosition(room),
     queue: room.queue,
@@ -407,6 +416,7 @@ io.on("connection", (socket) => {
   });
 
   // changeSong {song}  (B11) - the new song starts paused at 0:00
+  // The person who sent it is the one who picked the song.
   handle(socket, "changeSong", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
@@ -416,10 +426,17 @@ io.on("connection", (socket) => {
       return socket.emit("roomError", { message: "Song not found" });
     }
 
+    const by = room.members.get(socket.id) || null;
+
     if (song !== room.currentSong) pushHistory(room); // B15
-    updateRoom(room, { currentSong: song, isPlaying: false, position: 0 });
+    updateRoom(room, {
+      currentSong: song,
+      pickedBy: by,
+      isPlaying: false,
+      position: 0,
+    });
     room.songChangedAt = Date.now();
-    socket.to(room.code).emit("changeSong", { song });
+    socket.to(room.code).emit("changeSong", { song, by });
   });
 
   // ---- Queue (B14) ----
@@ -428,6 +445,7 @@ io.on("connection", (socket) => {
   // shared state, not an action, so there is no echo problem.)
 
   // addToQueue {song}
+  // "by" remembers who added it, so "Picked by" works when it starts playing.
   handle(socket, "addToQueue", (data) => {
     const room = getRoomOf(socket);
     if (!room) return;
@@ -442,7 +460,12 @@ io.on("connection", (socket) => {
       });
     }
 
-    room.queue.push({ id: room.nextQueueId++, file, title: songTitle(file) });
+    room.queue.push({
+      id: room.nextQueueId++,
+      file,
+      title: songTitle(file),
+      by: room.members.get(socket.id) || null,
+    });
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
   });
 
@@ -480,8 +503,8 @@ io.on("connection", (socket) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
-    const previousFile = room.history.pop();
-    if (!previousFile) {
+    const previous = room.history.pop();
+    if (!previous) {
       return socket.emit("roomError", { message: "No previous song" });
     }
 
@@ -490,9 +513,10 @@ io.on("connection", (socket) => {
         id: room.nextQueueId++,
         file: room.currentSong,
         title: songTitle(room.currentSong),
+        by: room.pickedBy,
       });
     }
-    startSong(room, previousFile);
+    startSong(room, previous.file, previous.by);
     broadcastState(room);
   });
 
