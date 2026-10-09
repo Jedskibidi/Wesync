@@ -49,15 +49,34 @@ app.post("/upload", (req, res) => {
     }
     if (err) return res.status(400).json({ ok: false, error: err.message });
     if (!req.file) {
-      return res
-        .status(400)
-        .json({
-          ok: false,
-          error: 'No file uploaded (field name must be "song")',
-        });
+      return res.status(400).json({
+        ok: false,
+        error: 'No file uploaded (field name must be "song")',
+      });
     }
     res.json({ ok: true, file: req.file.filename });
   });
+});
+
+// ---- Song list (B4) ----
+app.get("/songs", (req, res) => {
+  const files = fs
+    .readdirSync(MUSIC_DIR)
+    .filter((f) => f.toLowerCase().endsWith(".mp3"));
+
+  const songs = files
+    .map((file) => {
+      const added = fs.statSync(path.join(MUSIC_DIR, file)).mtimeMs;
+      const title = path
+        .basename(file, path.extname(file))
+        .replace(/^\d{10,}-/, "")
+        .replace(/-/g, " ");
+      return { file, title, added };
+    })
+    .sort((a, b) => b.added - a.added)
+    .map(({ file, title }) => ({ file, title }));
+
+  res.json(songs);
 });
 
 app.listen(PORT, () => {
