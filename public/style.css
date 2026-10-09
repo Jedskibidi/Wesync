@@ -413,4 +413,48 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
   background: rgba(90, 45, 12, 0.65);
 }
 .overlay .card { display: grid; gap: 14px; text-align: center; max-width: 360px; }
+
+/* Popup content: bee, title, text, button */
+.overlay-card { justify-items: center; gap: 12px; padding: 24px 28px; }
+.overlay-card h2 { margin: 0; font-size: 1.6rem; }
+.overlay-card p { font-size: 1.3rem; color: var(--text-muted); }
+.overlay-card .btn { margin-top: 6px; }
+.overlay-bee { animation: overlay-bob 800ms steps(2) infinite; }
+@keyframes overlay-bob { 50% { transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .overlay-bee { animation: none; } }
 .overlay .card p { margin: 0; }
+
+/* ---------- Member list panel ---------- */
+/* Sits inside the room card, under the code and the count */
+.member-panel { display: grid; gap: 4px; padding-top: 14px; border-top: 3px dotted var(--band); }
+.card .member-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 0 4px 8px; }
+.card .member-head h3 { margin: 0; }
+.member-count {
+  min-width: 2rem; padding: 0 8px; text-align: center;
+  font-family: var(--font-heading); font-weight: 700;
+  border: 3px solid var(--ink); background: var(--honey);
+  box-shadow: 0 3px 0 var(--ink);
+}
+.member-list { list-style: none; margin: 0; padding: 0; }
+.member {
+  display: flex; align-items: center; gap: 0.8rem;
+  padding: 0.5rem 0.9rem 0.5rem 1rem;
+  border-bottom: 3px dotted var(--band);
+  border-left: 6px solid transparent;
+}
+.member:last-child { border-bottom-color: transparent; }
+.member.is-you { background: var(--honey-light); border-left-color: var(--ink); }
+.member-avatar {
+  flex: none; width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border: 3px solid var(--ink);
+  font-family: var(--font-heading); font-weight: 700; font-size: 1.1rem;
+  box-shadow: inset 2px 2px 0 rgba(255, 255, 255, 0.45), inset -2px -2px 0 rgba(90, 45, 12, 0.2);
+}
+.member-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: var(--font-heading); font-weight: 600; font-size: 1.1rem; }
+.member-tag {
+  flex: none; padding: 0 8px; border: 2px solid var(--ink);
+  font-family: var(--font-heading); font-weight: 700; font-size: 0.85rem; line-height: 1.5;
+}
+.tag-you { background: var(--surface); }
+.tag-host { background: var(--honey); }
