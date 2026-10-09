@@ -89,10 +89,42 @@ function showError(text) {
   }, ERROR_VISIBLE_MS);
 }
 
+// Draw the member list: every nickname, with "You" and "host" badges.
+// textContent only, so a nickname can never inject HTML.
 function showMembers(members, host) {
-  $("members").textContent = members
-    .map((name) => (name === host ? `${name} (host)` : name))
-    .join(", ");
+  const me = submittedNickname.toLowerCase();
+  const list = $("members");
+  list.textContent = "";
+
+  // You first, then the others in the order they joined
+  const ordered = [...members].sort(
+    (a, b) => (b.toLowerCase() === me) - (a.toLowerCase() === me),
+  );
+
+  for (const name of ordered) {
+    const item = document.createElement("li");
+    item.className = "member";
+
+    const label = document.createElement("span");
+    label.className = "member-name";
+    label.textContent = name;
+    item.appendChild(label);
+
+    if (name.toLowerCase() === me) {
+      item.classList.add("is-you");
+      const you = document.createElement("span");
+      you.className = "badge badge-you";
+      you.textContent = "You";
+      item.appendChild(you);
+    }
+    if (name === host) {
+      const hostBadge = document.createElement("span");
+      hostBadge.className = "badge badge-host";
+      hostBadge.textContent = "Host";
+      item.appendChild(hostBadge);
+    }
+    list.appendChild(item);
+  }
 }
 
 function showOverlay() {
@@ -476,7 +508,8 @@ socket.on("syncTick", ({ position, isPlaying }) => {
 
 // Returns the trimmed nickname, or "" (after showing an error) if it is empty.
 function readNickname() {
-  const nickname = $("nickname").value.trim();
+  // Same cleaning as the server (spaces, 20 letters), so "You" matches
+  const nickname = $("nickname").value.trim().replace(/\s+/g, " ").slice(0, 20);
   if (!nickname) {
     showFieldError("nickname", "Please enter a nickname");
     return "";
