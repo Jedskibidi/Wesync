@@ -56,7 +56,9 @@ const upload = multer({
 });
 
 app.post("/upload", (req, res) => {
-  upload.single("song")(req, res, (err) => {
+  // any() accepts the file under any field name; the filter above still
+  // makes sure only .mp3 files get saved.
+  upload.any()(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       const msg =
         err.code === "LIMIT_FILE_SIZE"
@@ -65,13 +67,10 @@ app.post("/upload", (req, res) => {
       return res.status(400).json({ ok: false, error: msg });
     }
     if (err) return res.status(400).json({ ok: false, error: err.message });
-    if (!req.file) {
-      return res.status(400).json({
-        ok: false,
-        error: 'No file uploaded (field name must be "song")',
-      });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ ok: false, error: "No file uploaded" });
     }
-    res.json({ ok: true, file: req.file.filename });
+    res.json({ ok: true, file: req.files[0].filename });
   });
 });
 

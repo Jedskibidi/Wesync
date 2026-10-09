@@ -350,3 +350,20 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 .time-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .deck-volume { display: flex; align-items: center; gap: 0.6rem; }
 .deck-volume .slider { flex: 1 1 auto; min-width: 0; max-width: none; }
+
+/* ---------- Upload drop zone + status ---------- */
+.drop {
+  margin: 10px 0;
+  padding: 14px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface-2);
+  border: 3px dashed var(--ink);
+  color: var(--text-muted);
+}
+.drop:hover { background: var(--honey-light); }
+.drop.is-drag { background: var(--honey-light); border-style: solid; color: var(--ink); }
+.drop.is-busy { opacity: 0.6; cursor: progress; }
+.upload-status { margin: 0 0 10px; min-height: 1.25em; color: var(--text-muted); }
+.upload-status.ok { color: var(--ink); }
+.upload-status.error { color: var(--danger); }
