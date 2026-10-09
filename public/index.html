@@ -62,10 +62,8 @@
       <!-- Shown after you are in a room (roominfo.js adds the member count,
            "Copy invite link" and "Leave room" to this card) -->
       <section id="roomInfo" class="room card" aria-label="Room info" hidden>
-        <p class="room-info">
-          Room: <b id="room">none</b> &nbsp;|&nbsp; Members:
-          <span id="members">-</span>
-        </p>
+        <p class="room-info">Room: <b id="room">none</b></p>
+        <ul id="members" class="members" aria-label="Members"></ul>
       </section>
 
       <div class="layout">
