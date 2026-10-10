@@ -145,8 +145,8 @@
     playAudio();
 
     // Everyone else
-    socket.emit("changeSong", { song: file });
-    socket.emit("play", { position: 0 });
+    sendToRoom("changeSong", { song: file });
+    sendToRoom("play", { position: 0 });
   }
 
   // The server answers with queueUpdate, which redraws "Up next" for everyone
