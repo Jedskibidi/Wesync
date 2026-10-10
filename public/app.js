@@ -325,6 +325,19 @@ function makeQueueRowDraggable(li, item, index, queue) {
   });
 }
 
+// Small up / down buttons. The CSS only shows them on touch screens, where
+// drag and drop is unreliable. They send the same reorderQueue as a drag.
+function makeMoveButton(symbol, label, disabled, toIndex, id) {
+  const button = document.createElement("button");
+  button.className = "btn btn-secondary btn-sm";
+  button.type = "button";
+  button.textContent = symbol;
+  button.setAttribute("aria-label", label);
+  button.disabled = disabled;
+  button.onclick = () => socket.emit("reorderQueue", { id, toIndex });
+  return button;
+}
+
 // Draw the queue list. "queue" looks like [{ id, file, title }, ...].
 // We use textContent (not innerHTML) so a song title can never inject HTML.
 //
@@ -378,7 +391,15 @@ function renderQueue(queue = lastQueue) {
       socket.emit("removeFromQueue", { id: item.id });
     };
 
+    const move = document.createElement("span");
+    move.className = "queue-move";
+    move.append(
+      makeMoveButton("\u25B2", `Move ${item.title} up`, index === 0, index - 1, item.id),
+      makeMoveButton("\u25BC", `Move ${item.title} down`, index === items.length - 1, index + 1, item.id),
+    );
+
     li.appendChild(title);
+    li.appendChild(move);
     li.appendChild(removeButton);
     list.appendChild(li);
   });
@@ -1091,6 +1112,11 @@ const dropZone = $("dropZone");
 const songFile = $("songFile");
 const uploadStatus = $("uploadStatus");
 let uploading = false;
+
+// On a touch screen there is nothing to drag files from: say "tap" instead
+if (window.matchMedia("(pointer: coarse)").matches) {
+  dropZone.textContent = "Tap to choose .mp3 files";
+}
 
 function setUploadStatus(text, kind) {
   uploadStatus.textContent = text;

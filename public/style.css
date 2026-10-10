@@ -499,3 +499,52 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 #status[data-state="connected"] { color: #3f9142; }
 #status[data-state="reconnecting"] { color: #d98a00; }
 #status[data-state="offline"] { color: var(--danger); }
+
+
+/* ==========================================================
+   PHONES AND TOUCH SCREENS
+   The panels already stack in one column below 760px (.layout above).
+   Below 760px, or on any touch screen, controls get bigger.
+   ========================================================== */
+
+/* No 300 ms tap delay, no double-tap zoom on the controls */
+.btn, .input, .track, .drop, .slider { touch-action: manipulation; }
+.slider { touch-action: pan-y; } /* sideways drags move the thumb, not the page */
+
+/* Up / down buttons in the queue: touch screens only */
+.queue-move { display: none; gap: 8px; margin-left: auto; }
+.queue .track .queue-move .btn { margin-left: 0; }
+.queue .track .queue-move + .btn { margin-left: 0; }
+
+@media (pointer: coarse), (max-width: 760px) {
+  .btn, .input { min-height: 44px; }
+  .btn-sm { min-height: 44px; padding: 0.35rem 0.9rem; font-size: 0.95rem; }
+  .btn-icon { min-height: 0; }
+
+  /* Fatter bars and thumbs that are easy to grab with a finger */
+  .slider { height: 32px; }
+  .slider::-webkit-slider-thumb { width: 24px; height: 44px; }
+  .slider::-moz-range-thumb { width: 18px; height: 38px; }
+
+  /* Room between buttons that sit side by side, so a thumb hits the right one */
+  #library .lib-actions { gap: 10px; }
+  .field-row { gap: 12px; }
+  .track { gap: 0.7rem; }
+}
+
+@media (pointer: coarse) {
+  .queue-move { display: flex; }
+}
+
+@media (max-width: 420px) {
+  /* The search box gets its own row so its hint is not cut off */
+  #library .field-row .input { flex: 1 1 100%; }
+}
+
+@media (max-width: 760px) {
+  /* Toasts across the bottom, clear of the phone's home bar */
+  .toasts {
+    left: 12px; right: 12px; align-items: center;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
