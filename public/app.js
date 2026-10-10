@@ -1355,7 +1355,7 @@ readInviteFromUrl();
 
 // ---------- Extra features, each in its own file ----------
 // Each file loads on its own, so they cannot conflict with other work.
-["library.js", "roominfo.js"].forEach((file) => {
+["library.js", "roominfo.js", "visualizer.js"].forEach((file) => {
   const script = document.createElement("script");
   script.src = file;
   document.body.appendChild(script);
