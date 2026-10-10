@@ -32,6 +32,8 @@ let messageTimer = null;
 
 // The song library from GET /songs: [{ file, title }, ...], newest first
 let library = [];
+let songsLoading = true; // true until the first /songs answer (spinner)
+let songsFailed = false; // true if /songs could not be loaded
 // Song lengths in seconds, by file name (null while we are still loading it)
 const durations = new Map();
 
@@ -73,6 +75,74 @@ function showError(text) {
   messageTimer = setTimeout(() => {
     if ($("message").textContent === text) showMessage("");
   }, ERROR_VISIBLE_MS);
+}
+
+// A small spinning ring (the CSS draws and turns it)
+function makeSpinner() {
+  const spinner = document.createElement("span");
+  spinner.className = "spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  return spinner;
+}
+
+// A message with a spinner in front, for things that are still loading.
+// It stays until something replaces it (showMessage / showError).
+function showLoading(text) {
+  clearTimeout(messageTimer);
+  const box = $("message");
+  box.textContent = "";
+  box.append(makeSpinner(), text);
+}
+
+// Turn whatever the server said into a friendly sentence. Anything we do not
+// recognise becomes a generic message, so raw error text is never shown.
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+function friendlyError(raw) {
+  const text = String(raw || "").trim();
+  const rules = [
+    [/^Room (\w+) not found/i, (m) => `We couldn't find room ${m[1].toUpperCase()}. Check the code and try again.`],
+    [/nickname.*already taken/i, () => "Someone in this room already uses that nickname. Please pick another one."],
+    [/^Please enter a nickname/i, () => "Please enter a nickname."],
+    [/room code has 4/i, () => "A room code has 4 letters or numbers."],
+    [/not in a room/i, () => "You're not in a room right now. Create or join one first."],
+    [/^Pick a song first/i, () => "Pick a song first."],
+    [/^Song not found/i, () => "We couldn't find that song. It may have been deleted."],
+    [/queue is full/i, () => "The queue is full. Remove a song to make room."],
+    [/not in the queue/i, () => "That song was already removed from the queue."],
+    [/queue is empty/i, () => "The queue is empty. Add a song first."],
+    [/no previous song/i, () => "There's no previous song to go back to."],
+    [/went wrong on the server/i, () => "The server had a problem. Please try again."],
+  ];
+  for (const [pattern, make] of rules) {
+    const match = text.match(pattern);
+    if (match) return make(match);
+  }
+  return GENERIC_ERROR;
+}
+
+// Creating or joining a room: spinner, buttons off, and a friendly message
+// if the server never answers.
+const ROOM_LOADING_TIMEOUT_MS = 10000;
+let roomLoadingTimer = null;
+
+function startRoomLoading(text) {
+  $("create").disabled = true;
+  $("join").disabled = true;
+  showLoading(text);
+  clearTimeout(roomLoadingTimer);
+  roomLoadingTimer = setTimeout(() => {
+    stopRoomLoading();
+    pendingAction = null;
+    showError("The server is taking too long to answer. Please try again in a moment.");
+  }, ROOM_LOADING_TIMEOUT_MS);
+}
+
+function stopRoomLoading() {
+  clearTimeout(roomLoadingTimer);
+  $("create").disabled = false;
+  $("join").disabled = false;
+  if ($("message").querySelector(".spinner")) showMessage("");
 }
 
 const AVATAR_COLORS = ["#f7b731", "#f29a8e", "#ffd966", "#dda66a"];
@@ -610,8 +680,10 @@ socket.on("connect", () => {
   // Connection came back after a drop: the server forgot us, so rejoin.
   if (lastRoom) {
     rejoining = true;
-    showMessage("Reconnecting to your room...");
+    showLoading("Reconnecting to your room...");
     socket.emit("joinRoom", lastRoom);
+  } else {
+    showMessage(""); // clears "can't reach the server" and similar
   }
 });
 
@@ -625,12 +697,13 @@ socket.on("disconnect", (reason) => {
   audio.pause();
   updateControls();
   updateNowPlaying(); // hides "Picked by" while we are out of the room
+  stopRoomLoading();
   if (lastRoom) {
     // We will try to rejoin automatically when the connection returns
-    showMessage("Connection lost. Reconnecting...");
+    showLoading("Lost connection to the server. Trying to reconnect...");
   } else {
     showLanding();
-    showMessage("Disconnected. Create or join a room again.");
+    showMessage("You're disconnected from the server. Wait for it to reconnect, then create or join a room.");
   }
 });
 
@@ -638,10 +711,14 @@ socket.on("disconnect", (reason) => {
 socket.on("connect_error", () => {
   // Never connected: nothing to reconnect to yet. Connected before: retrying.
   setConnection(everConnected ? "reconnecting" : "offline");
+  if (!everConnected) {
+    showMessage("We can't reach the server right now. Check your connection. We'll keep trying.");
+  }
 });
 
 socket.on("roomState", (state) => {
   const justJoined = pendingAction === "join"; // the user pressed Join Room
+  stopRoomLoading();
   showMessage("");
   clearFieldErrors();
   rejoining = false;
@@ -661,24 +738,27 @@ socket.on("queueUpdate", ({ queue }) => {
 });
 
 socket.on("roomError", (err) => {
+  stopRoomLoading();
+  const text = friendlyError(err && err.message);
+
   if (rejoining) {
     // The server did not take us back (for example the room is gone)
     rejoining = false;
     lastRoom = null;
     clearUrl();
     showLanding();
-    showError(`Could not rejoin your room. ${err.message}`);
+    showError("We couldn't take you back to your room. It may have closed, so please create or join a room again.");
     return;
   }
 
   // On the first screen, show the error under the field it is about
   if (!inRoom && pendingAction) {
-    showLandingError(err.message);
+    showLandingError(text);
     pendingAction = null;
     return;
   }
 
-  showError(err.message);
+  showError(text);
 });
 
 // Someone else pressed a button. We only change our own audio here.
@@ -789,6 +869,7 @@ function startCreate() {
   pendingAction = "create";
   submittedNickname = nickname;
   socket.emit("createRoom", { nickname });
+  startRoomLoading("Creating your room...");
 }
 
 function startJoin() {
@@ -806,6 +887,7 @@ function startJoin() {
   pendingAction = "join";
   submittedNickname = nickname;
   socket.emit("joinRoom", { code, nickname });
+  startRoomLoading(`Joining room ${code}...`);
 }
 
 $("create").onclick = startCreate;
@@ -995,7 +1077,7 @@ audio.addEventListener("ended", () => {
 // The file could not be loaded or decoded (B16): missing, deleted, broken
 audio.addEventListener("error", () => {
   if (!currentSong) return;
-  showError("This song could not be loaded. Try another one.");
+  showError("We couldn't play this song. The file may be missing or damaged, so try another one.");
 });
 
 // ---------- Playlist (the "library") ----------
@@ -1036,7 +1118,13 @@ function renderPlaylist() {
   if (library.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = "No songs yet. Add your mp3 files.";
+    if (songsLoading) {
+      empty.append(makeSpinner(), "Loading songs...");
+    } else if (songsFailed) {
+      empty.textContent = "We couldn't load your songs. Check your connection and refresh the page.";
+    } else {
+      empty.textContent = "No songs yet. Add your mp3 files.";
+    }
     list.appendChild(empty);
     return;
   }
@@ -1085,18 +1173,25 @@ function renderPlaylist() {
 // Fetch /songs and draw the playlist. We call this on page load and again
 // after every successful upload. Returns true if the list was loaded.
 async function loadSongs() {
+  songsLoading = true;
+  renderPlaylist();
   try {
     const res = await fetch("/songs");
     if (!res.ok) throw new Error("Bad response from /songs");
     const songs = await res.json();
 
     library = Array.isArray(songs) ? songs : [];
+    songsLoading = false;
+    songsFailed = false;
     renderPlaylist();
     library.forEach((song) => fetchDuration(song.file));
     updateLcdTitle(); // the LCD can now show the song number
     return true;
   } catch {
-    showError("Could not load the song list. Try refreshing the page.");
+    songsLoading = false;
+    songsFailed = true;
+    renderPlaylist();
+    showError("We couldn't load the song list. Check your connection and refresh the page.");
     return false;
   }
 }
@@ -1136,6 +1231,22 @@ function checkFile(file) {
   return "";
 }
 
+// A short, friendly reason for a failed upload. The server's own text is
+// never shown, only what we recognise in it.
+async function uploadFailureReason(res) {
+  let reason = "";
+  try {
+    const data = await res.json();
+    reason = String(data.error || data.message || "");
+  } catch {}
+  if (res.status === 413 || /too large/i.test(reason)) {
+    return `it's too big (max ${MAX_UPLOAD_MB} MB)`;
+  }
+  if (/only mp3/i.test(reason)) return "it isn't an MP3 file";
+  if (res.status >= 500) return "the server had a problem, please try again";
+  return "the upload didn't work, please try again";
+}
+
 async function uploadFiles(fileList) {
   if (uploading) return;
 
@@ -1164,25 +1275,14 @@ async function uploadFiles(fileList) {
       const formData = new FormData();
       formData.append(UPLOAD_FIELD, file, file.name);
       const res = await fetch("/upload", { method: "POST", body: formData });
-      if (!res.ok) {
-        // Show the server's own reason if it sent one (short text or {error|message})
-        let reason = "";
-        try {
-          const text = (await res.text()).trim();
-          try {
-            const data = JSON.parse(text);
-            reason = data.error || data.message || "";
-          } catch {
-            reason = text;
-          }
-        } catch {}
-        throw new Error(
-          `server said ${res.status}${reason ? ": " + reason.slice(0, 120) : ""}`,
-        );
+      if (res.ok) {
+        uploaded++;
+      } else {
+        problems.push(`${file.name}: ${await uploadFailureReason(res)}`);
       }
-      uploaded++;
-    } catch (err) {
-      problems.push(`${file.name}: ${err.message}`);
+    } catch {
+      // fetch itself failed: no network, or the server is down
+      problems.push(`${file.name}: couldn't reach the server, check your connection`);
     }
   }
 

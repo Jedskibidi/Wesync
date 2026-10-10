@@ -60,8 +60,10 @@
 
   // ---------- Draw the list ----------
 
-  function setStatus(text) {
-    status.textContent = text;
+  function setStatus(text, loading = false) {
+    status.textContent = "";
+    if (loading) status.append(makeSpinner()); // from app.js
+    status.append(text);
     status.hidden = !text;
   }
 
@@ -78,10 +80,10 @@
   function render() {
     list.innerHTML = "";
 
-    if (loadState === "loading") return setStatus("Loading songs...");
+    if (loadState === "loading") return setStatus("Loading songs...", true);
     if (loadState === "error") {
       return setStatus(
-        "Could not load the song list. Press Refresh to try again.",
+        "We couldn't load the song list. Check your connection and press Refresh.",
       );
     }
     if (songs.length === 0) return setStatus("No songs yet, upload one!");

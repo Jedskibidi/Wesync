@@ -548,3 +548,15 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+
+/* ---------- Loading spinner ---------- */
+.spinner {
+  display: inline-block;
+  width: 1em; height: 1em;
+  margin-right: 0.5em; vertical-align: -0.15em;
+  border: 3px solid var(--band); border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spin 0.8s steps(8) infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
