@@ -406,6 +406,17 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 .queue .track:hover { background: transparent; }
 .queue .track .btn { margin-left: auto; }
 
+/* The playing song is the first row: keep the honey look, no hover change */
+.queue .track.is-active { cursor: default; }
+.queue .track.is-active:hover { background: var(--honey-light); }
+.queue .track .member-tag { margin-left: auto; }
+
+/* Drag to reorder */
+.queue .track[draggable="true"] { cursor: grab; }
+.queue .track.is-dragging { opacity: 0.45; cursor: grabbing; }
+.queue .track.drop-before { box-shadow: 0 -3px 0 0 var(--ink); }
+.queue .track.drop-after { box-shadow: 0 3px 0 0 var(--ink); }
+
 /* "Music is already playing" popup */
 .overlay {
   position: fixed; inset: 0; z-index: 10;

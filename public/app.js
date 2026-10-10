@@ -269,23 +269,103 @@ function updateControls() {
 
 // ---------- Queue (F14) ----------
 
+// id of the queue item being dragged right now (null when nothing is)
+let draggedQueueId = null;
+
+function clearDropMarks() {
+  $("queueList")
+    .querySelectorAll(".drop-before, .drop-after, .is-dragging")
+    .forEach((row) => row.classList.remove("drop-before", "drop-after", "is-dragging"));
+}
+
+// Make a queue row draggable. Dropping it sends reorderQueue; the server
+// answers with queueUpdate, so every tab redraws in the same new order.
+function makeQueueRowDraggable(li, item, index, queue) {
+  li.draggable = true;
+
+  li.addEventListener("dragstart", (e) => {
+    draggedQueueId = item.id;
+    li.classList.add("is-dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(item.id)); // Firefox needs data
+  });
+
+  li.addEventListener("dragend", () => {
+    draggedQueueId = null;
+    clearDropMarks();
+  });
+
+  li.addEventListener("dragover", (e) => {
+    if (draggedQueueId === null) return; // not one of our rows (e.g. a file)
+    e.preventDefault();
+    const box = li.getBoundingClientRect();
+    const after = e.clientY > box.top + box.height / 2;
+    li.classList.toggle("drop-after", after);
+    li.classList.toggle("drop-before", !after);
+  });
+
+  li.addEventListener("dragleave", () => {
+    li.classList.remove("drop-before", "drop-after");
+  });
+
+  li.addEventListener("drop", (e) => {
+    if (draggedQueueId === null) return;
+    e.preventDefault();
+
+    const after = li.classList.contains("drop-after");
+    const from = queue.findIndex((q) => q.id === draggedQueueId);
+    let to = index + (after ? 1 : 0);
+    if (from !== -1 && from < to) to--; // the dragged row leaves its old place
+
+    if (from !== -1 && from !== to) {
+      socket.emit("reorderQueue", { id: draggedQueueId, toIndex: to });
+    }
+    draggedQueueId = null;
+    clearDropMarks();
+  });
+}
+
 // Draw the queue list. "queue" looks like [{ id, file, title }, ...].
 // We use textContent (not innerHTML) so a song title can never inject HTML.
-function renderQueue(queue) {
+//
+// The last queue we were given is kept, so the list can be redrawn when the
+// playing song changes (loadSong / clearSong call renderQueue() with no
+// argument). The song that is playing now is drawn as the first row.
+let lastQueue = [];
+
+function renderQueue(queue = lastQueue) {
+  lastQueue = Array.isArray(queue) ? queue : [];
+  const items = inRoom ? lastQueue : []; // no room, no queue
+
   const list = $("queueList");
   list.innerHTML = "";
 
-  if (!queue || queue.length === 0) {
+  // The song that is playing now: highlighted, not draggable, no Remove
+  if (inRoom && currentSong) {
+    const nowRow = document.createElement("li");
+    nowRow.className = "track is-active";
+    nowRow.setAttribute("aria-current", "true");
+
+    const nowTitle = document.createElement("span");
+    nowTitle.className = "track-title";
+    nowTitle.textContent = titleFromFile(currentSong);
+
+    nowRow.append(nowTitle, makeTag("Now playing", "tag-host"));
+    list.appendChild(nowRow);
+  }
+
+  if (items.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
-    empty.textContent = "The queue is empty";
+    empty.textContent = "Queue is empty";
     list.appendChild(empty);
     return;
   }
 
-  queue.forEach((item) => {
+  items.forEach((item, index) => {
     const li = document.createElement("li");
     li.className = "track";
+    makeQueueRowDraggable(li, item, index, items);
 
     const title = document.createElement("span");
     title.className = "track-title";
@@ -334,6 +414,7 @@ function loadSong(file, by = null) {
   updateControls();
   updateLcdTitle();
   renderPlaylist();
+  renderQueue(); // the playing song is the first row of the queue
 }
 
 function clearSong() {
@@ -352,6 +433,7 @@ function clearSong() {
   updateControls();
   updateLcdTitle();
   renderPlaylist();
+  renderQueue(); // the playing song is the first row of the queue
 }
 
 function seekTo(seconds) {

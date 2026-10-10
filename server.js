@@ -485,6 +485,30 @@ io.on("connection", (socket) => {
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
   });
 
+  // reorderQueue {id, toIndex}
+  // Move one queue item to a new place. We use the item's id (not its old
+  // position) so the move is still right if the queue changed a moment ago.
+  handle(socket, "reorderQueue", (data) => {
+    const room = getRoomOf(socket);
+    if (!room) return;
+
+    const from = room.queue.findIndex((item) => item.id === data.id);
+    if (from === -1) {
+      return socket.emit("roomError", {
+        message: "That song is not in the queue",
+      });
+    }
+    if (!Number.isInteger(data.toIndex)) return;
+
+    const to = Math.min(Math.max(data.toIndex, 0), room.queue.length - 1);
+    if (to !== from) {
+      const [moved] = room.queue.splice(from, 1);
+      room.queue.splice(to, 0, moved);
+    }
+    // Always answer, so a tab that showed the move early is put right
+    io.to(room.code).emit("queueUpdate", { queue: room.queue });
+  });
+
   // ---- Next, previous, auto-advance (B15) ----
 
   // next: play the first song in the queue
