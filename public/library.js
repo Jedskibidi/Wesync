@@ -121,13 +121,15 @@
     playButton.className = "btn btn-sm";
     playButton.type = "button";
     playButton.textContent = "Play";
+    playButton.setAttribute("aria-label", `Play ${song.title}`);
     playButton.onclick = () => playSong(song.file);
 
     const queueButton = document.createElement("button");
     queueButton.className = "btn btn-sm btn-secondary";
     queueButton.type = "button";
     queueButton.textContent = "Add to queue";
-    queueButton.onclick = () => addSongToQueue(song.file, queueButton);
+    queueButton.setAttribute("aria-label", `Add to queue: ${song.title}`);
+    queueButton.onclick = () => addSongToQueue(song, queueButton);
 
     actions.append(playButton, queueButton);
     row.append(info, actions);
@@ -152,9 +154,12 @@
   }
 
   // The server answers with queueUpdate, which redraws "Up next" for everyone
-  function addSongToQueue(file, button) {
+  function addSongToQueue(song, button) {
     if (!inRoom) return showError("Join a room first");
-    socket.emit("addToQueue", { song: file });
+    socket.emit("addToQueue", { song: song.file });
+    // The button text changes, but a screen reader would not say it
+    // (the focus stays on the button), so also say it as a toast.
+    showToast(`Added to queue: ${song.title}`);
 
     button.textContent = "Added!";
     setTimeout(() => {
