@@ -36,7 +36,7 @@
   --surface-2: #fbe3a0;
   --ink: #5a2d0c;            /* outlines + text */
   --text: #5a2d0c;
-  --text-muted: #8a5a2b;
+  --text-muted: #734316;     /* 6:1 on the cards (was #8a5a2b, 4.3:1 on honey rows) */
   --honey: #f7b731;
   --accent: var(--honey);    /* alias: main accent color */
   --honey-light: #ffd966;
@@ -496,8 +496,8 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
   border-radius: 50%;
   background: currentColor;
 }
-#status[data-state="connected"] { color: #3f9142; }
-#status[data-state="reconnecting"] { color: #d98a00; }
+#status[data-state="connected"] { color: #2b6b2e; }      /* darker green: 5:1 on the page */
+#status[data-state="reconnecting"] { color: #8a5200; }   /* darker amber: 5:1 on the page */
 #status[data-state="offline"] { color: var(--danger); }
 
 
@@ -511,8 +511,9 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 .btn, .input, .track, .drop, .slider { touch-action: manipulation; }
 .slider { touch-action: pan-y; } /* sideways drags move the thumb, not the page */
 
-/* Up / down buttons in the queue: touch screens only */
-.queue-move { display: none; gap: 8px; margin-left: auto; }
+/* Up / down buttons in the queue: always shown, so the queue can be
+   reordered with the keyboard too (drag and drop needs a mouse) */
+.queue-move { display: flex; gap: 8px; margin-left: auto; }
 .queue .track .queue-move .btn { margin-left: 0; }
 .queue .track .queue-move + .btn { margin-left: 0; }
 
@@ -560,3 +561,42 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
   animation: spin 0.8s steps(8) infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+
+/* ---------- Keyboard focus ----------
+   Every focusable thing gets an outline. An outline cannot be overridden by
+   the box-shadow rules on buttons and cards (the big play button used to
+   lose its focus ring that way). It only shows for the keyboard, not for
+   mouse clicks. */
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+
+
+/* ---------- Song list: search box and the Play / + Queue buttons ---------- */
+.search-row { margin: 0 10px 10px; }
+.row-actions { display: flex; gap: 6px; flex: none; }
+
+/* ---------- Big cards stay still on hover ----------
+   The small lift is nice on a button, but on a card full of rows the whole
+   card jumped 2px every time the mouse moved over it. */
+.layout .card:hover, .room.card:hover {
+  transform: none;
+  background: var(--surface);
+  box-shadow: inset 3px 3px 0 #fffbe8, inset -3px -3px 0 var(--surface-2), 0 4px 0 var(--ink);
+}
+
+/* ---------- Desktop: the room card in two columns ----------
+   Code, count and buttons on the left, the member list on the right, so the
+   card is about half as tall. (Phones keep the single column.) */
+@media (min-width: 761px) {
+  #roomInfo {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    grid-template-rows: auto auto auto 1fr; /* the last row soaks up extra height */
+    column-gap: 24px;
+    align-items: start;
+  }
+  #roomInfo .member-panel {
+    grid-column: 2; grid-row: 1 / span 4;
+    border-top: 0; padding-top: 0;
+    border-left: 3px dotted var(--band); padding-left: 24px;
+  }
+}

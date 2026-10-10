@@ -36,6 +36,7 @@ let songsLoading = true; // true until the first /songs answer (spinner)
 let songsFailed = false; // true if /songs could not be loaded
 // Song lengths in seconds, by file name (null while we are still loading it)
 const durations = new Map();
+let filterText = ""; // what is typed in the song search box
 
 // ---------- Small helpers ----------
 
@@ -196,12 +197,31 @@ function makeTag(text, className) {
   return tag;
 }
 
+let focusBeforeOverlay = null; // where the keyboard focus was, to go back to
+
 function showOverlay() {
+  if (!$("joinOverlay").hidden) return; // already up
+  focusBeforeOverlay = document.activeElement;
   $("joinOverlay").hidden = false;
+  // While the popup is open the rest of the page cannot be reached (Tab,
+  // clicks, screen reader), so the keyboard focus cannot wander behind it.
+  document.querySelector("main").inert = true;
+  $("joinListening").focus();
 }
 
 function hideOverlay() {
+  if ($("joinOverlay").hidden) return; // nothing to close
   $("joinOverlay").hidden = true;
+  document.querySelector("main").inert = false;
+
+  // Give the focus back to where it was (or to the play button if that
+  // place is gone, for example the first screen that just closed)
+  const back = focusBeforeOverlay;
+  focusBeforeOverlay = null;
+  if (back && back !== document.body) back.focus();
+  if (!document.activeElement || document.activeElement === document.body) {
+    if (!$("playPause").disabled) $("playPause").focus();
+  }
 }
 
 // ---------- First screen: inline errors ----------
@@ -243,17 +263,27 @@ function showLandingError(text) {
 
 // Not in a room: show the create/join card
 function showLanding() {
+  // If the keyboard focus is on a button that is about to disappear
+  // ("Leave room"), move it to the first field so it is not lost
+  const hadFocus = $("roomInfo").contains(document.activeElement);
   $("roomSection").hidden = false;
   $("roomInfo").hidden = true;
   $("memberPanel").hidden = true;
+  if (hadFocus) $("nickname").focus();
 }
 
 // In a room: show the room card (member count, copy link, leave)
 function showRoomView() {
+  // Same idea: the "Create Room" / "Join Room" button is about to disappear
+  const hadFocus = $("roomSection").contains(document.activeElement);
   $("roomSection").hidden = true;
   $("inviteHint").hidden = true;
   $("roomInfo").hidden = false;
   $("memberPanel").hidden = false;
+  if (hadFocus) {
+    const first = $("roomInfo").querySelector("button"); // "Copy invite link"
+    if (first) first.focus();
+  }
 }
 
 // Keep the address bar as an invite link: ?room=AB12
@@ -280,7 +310,10 @@ function updateSeekFill() {
 }
 
 function updateVolumeFill() {
-  setFill($("volume"), Number($("volume").value) * 100);
+  const volume = Number($("volume").value);
+  setFill($("volume"), volume * 100);
+  // A screen reader says "50%" instead of "0.5"
+  $("volume").setAttribute("aria-valuetext", `${Math.round(volume * 100)}%`);
 }
 
 // The current time under the seek bar and on the LCD, and the seek thumb
@@ -290,6 +323,11 @@ function updateTimeDisplay() {
   const shown = isSeeking ? Number(seekBar.value) : audio.currentTime;
   $("currentTime").textContent = formatTime(shown);
   $("lcdTime").textContent = lcdFormat(shown);
+  // A screen reader says "1:05 of 3:20" instead of a number of seconds
+  seekBar.setAttribute(
+    "aria-valuetext",
+    `${formatTime(shown)} of ${formatTime(audio.duration)}`,
+  );
   updateSeekFill();
 }
 
@@ -298,9 +336,10 @@ function updateLcdTitle() {
   if (!currentSong) {
     $("lcdTrack").textContent = "INSERT DISC";
   } else {
+    // Only the track number: the title is already shown big, right below
     const index = library.findIndex((song) => song.file === currentSong);
-    const number = index >= 0 ? String(index + 1).padStart(2, "0") + " " : "";
-    $("lcdTrack").textContent = number + titleFromFile(currentSong);
+    const number = index >= 0 ? String(index + 1).padStart(2, "0") : "";
+    $("lcdTrack").textContent = number ? `TRACK ${number}` : "PLAYING";
   }
   updateNowPlaying();
 }
@@ -395,14 +434,17 @@ function makeQueueRowDraggable(li, item, index, queue) {
   });
 }
 
-// Small up / down buttons. The CSS only shows them on touch screens, where
-// drag and drop is unreliable. They send the same reorderQueue as a drag.
-function makeMoveButton(symbol, label, disabled, toIndex, id) {
+// Small up / down buttons. They are the way to reorder with the keyboard or
+// a touch screen, where drag and drop does not work. They send the same
+// reorderQueue as a drag. "action" ("up" / "down") lets renderQueue put the
+// keyboard focus back on the same button after the list is redrawn.
+function makeMoveButton(symbol, label, disabled, toIndex, id, action) {
   const button = document.createElement("button");
   button.className = "btn btn-secondary btn-sm";
   button.type = "button";
   button.textContent = symbol;
   button.setAttribute("aria-label", label);
+  button.dataset.action = action;
   button.disabled = disabled;
   button.onclick = () => socket.emit("reorderQueue", { id, toIndex });
   return button;
@@ -416,38 +458,67 @@ function makeMoveButton(symbol, label, disabled, toIndex, id) {
 // argument). The song that is playing now is drawn as the first row.
 let lastQueue = [];
 
+// The queue is redrawn from scratch after every change, which would drop the
+// keyboard focus on the page. These two remember which button had the focus
+// and put it back (or on the nearest sensible button).
+function queueFocusInfo(list) {
+  const active = document.activeElement;
+  if (!active || !list.contains(active)) return null;
+  const row = active.closest("li[data-queue-id]");
+  if (!row) return null;
+  const rows = Array.from(list.querySelectorAll("li[data-queue-id]"));
+  return {
+    id: row.dataset.queueId,
+    action: active.dataset.action || "remove",
+    index: rows.indexOf(row),
+  };
+}
+
+function restoreQueueFocus(list, info) {
+  if (!info) return;
+  const rows = Array.from(list.querySelectorAll("li[data-queue-id]"));
+  let target = null;
+
+  const sameRow = rows.find((row) => row.dataset.queueId === info.id);
+  if (sameRow) {
+    // The same button if it still works (the first row's "up" is off now),
+    // otherwise any other button of that row
+    target =
+      sameRow.querySelector(`button[data-action="${info.action}"]:not(:disabled)`) ||
+      sameRow.querySelector("button:not(:disabled)");
+  } else if (rows.length > 0) {
+    // The row was removed: the "Remove" button of the row that took its place
+    const next = rows[Math.min(info.index, rows.length - 1)];
+    target = next.querySelector('button[data-action="remove"]');
+  }
+  if (!target && !$("playPause").disabled) target = $("playPause");
+  if (target) target.focus();
+}
+
 function renderQueue(queue = lastQueue) {
   lastQueue = Array.isArray(queue) ? queue : [];
   const items = inRoom ? lastQueue : []; // no room, no queue
 
   const list = $("queueList");
+  const focused = queueFocusInfo(list);
   list.innerHTML = "";
 
-  // The song that is playing now: highlighted, not draggable, no Remove
-  if (inRoom && currentSong) {
-    const nowRow = document.createElement("li");
-    nowRow.className = "track is-active";
-    nowRow.setAttribute("aria-current", "true");
-
-    const nowTitle = document.createElement("span");
-    nowTitle.className = "track-title";
-    nowTitle.textContent = titleFromFile(currentSong);
-
-    nowRow.append(nowTitle, makeTag("Now playing", "tag-host"));
-    list.appendChild(nowRow);
-  }
-
+  // (The song that is playing now is not repeated here: it already shows in
+  // "Now playing" and highlighted in the Playlist. This list is only what
+  // comes next.)
   if (items.length === 0) {
     const empty = document.createElement("li");
     empty.className = "empty";
     empty.textContent = "Queue is empty";
     list.appendChild(empty);
+    restoreQueueFocus(list, focused);
     return;
   }
 
   items.forEach((item, index) => {
     const li = document.createElement("li");
     li.className = "track";
+    li.dataset.queueId = item.id;
     makeQueueRowDraggable(li, item, index, items);
 
     const title = document.createElement("span");
@@ -457,6 +528,8 @@ function renderQueue(queue = lastQueue) {
     const removeButton = document.createElement("button");
     removeButton.className = "btn btn-secondary btn-sm";
     removeButton.textContent = "Remove";
+    removeButton.dataset.action = "remove";
+    removeButton.setAttribute("aria-label", `Remove ${item.title} from queue`);
     removeButton.onclick = () => {
       socket.emit("removeFromQueue", { id: item.id });
     };
@@ -464,8 +537,8 @@ function renderQueue(queue = lastQueue) {
     const move = document.createElement("span");
     move.className = "queue-move";
     move.append(
-      makeMoveButton("\u25B2", `Move ${item.title} up`, index === 0, index - 1, item.id),
-      makeMoveButton("\u25BC", `Move ${item.title} down`, index === items.length - 1, index + 1, item.id),
+      makeMoveButton("\u25B2", `Move ${item.title} up`, index === 0, index - 1, item.id, "up"),
+      makeMoveButton("\u25BC", `Move ${item.title} down`, index === items.length - 1, index + 1, item.id, "down"),
     );
 
     li.appendChild(title);
@@ -473,6 +546,8 @@ function renderQueue(queue = lastQueue) {
     li.appendChild(removeButton);
     list.appendChild(li);
   });
+
+  restoreQueueFocus(list, focused);
 }
 
 // ---------- Room playback memory ----------
@@ -489,6 +564,21 @@ function expectedPosition() {
 
 // ---------- Audio actions (these never send anything to the server) ----------
 
+// Back to the start: seek bar empty (and its length forgotten until the new
+// song says how long it is), times at 0:00. Used when a song is loaded or
+// cleared, so the old song's numbers never stay on screen.
+function resetPlayerDisplay() {
+  isSeeking = false; // a drag that was going on is over
+  const seekBar = $("seek");
+  seekBar.max = 0;
+  seekBar.value = 0;
+  seekBar.setAttribute("aria-valuetext", "0:00 of 0:00");
+  $("currentTime").textContent = "0:00";
+  $("duration").textContent = "0:00";
+  $("lcdTime").textContent = "00:00";
+  updateSeekFill();
+}
+
 // "by" is the nickname of whoever picked the song (null when playing alone
 // or when we do not know).
 function loadSong(file, by = null) {
@@ -497,11 +587,7 @@ function loadSong(file, by = null) {
   audio.src = "/music/" + encodeURIComponent(file);
   audio.load();
   audio.pause();
-  $("seek").value = 0;
-  $("currentTime").textContent = "0:00";
-  $("duration").textContent = "0:00";
-  $("lcdTime").textContent = "00:00";
-  updateSeekFill();
+  resetPlayerDisplay();
   updateControls();
   updateLcdTitle();
   renderPlaylist();
@@ -516,11 +602,7 @@ function clearSong() {
   audio.pause();
   audio.removeAttribute("src");
   audio.load();
-  $("seek").value = 0;
-  $("currentTime").textContent = "0:00";
-  $("duration").textContent = "0:00";
-  $("lcdTime").textContent = "00:00";
-  updateSeekFill();
+  resetPlayerDisplay();
   updateControls();
   updateLcdTitle();
   renderPlaylist();
@@ -542,9 +624,9 @@ function playAudio() {
     if (err.name === "NotAllowedError") {
       // Browsers block sound until the user has clicked on the page.
       showOverlay();
-    } else if (err.name === "NotSupportedError") {
-      showError("This song can't be played in your browser.");
     }
+    // NotSupportedError (a missing or broken file) is explained by the audio
+    // "error" handler further down, so no second message is shown here.
     // AbortError just means a new song was loaded in the meantime. Harmless.
   });
 }
@@ -1003,13 +1085,37 @@ $("seek").addEventListener("input", () => {
   updateTimeDisplay();
 });
 
-$("seek").addEventListener("change", () => {
+function commitSeek() {
   isSeeking = false;
   if (!currentSong) return;
   const position = Number($("seek").value);
   remember(position, playback.isPlaying);
   seekTo(position);
   sendToRoom("seek", { position });
+}
+
+$("seek").addEventListener("change", commitSeek);
+
+// Keyboard: the arrow keys jump 5 seconds. (The slider's own step is 0.1 s,
+// which would take forever to cross a song.) Home, End, Page Up and Page
+// Down still work the normal way.
+const SEEK_KEY_SECONDS = 5;
+const SEEK_KEYS = {
+  ArrowLeft: -SEEK_KEY_SECONDS,
+  ArrowDown: -SEEK_KEY_SECONDS,
+  ArrowRight: SEEK_KEY_SECONDS,
+  ArrowUp: SEEK_KEY_SECONDS,
+};
+
+$("seek").addEventListener("keydown", (e) => {
+  const change = SEEK_KEYS[e.key];
+  if (change === undefined || !currentSong) return;
+  e.preventDefault();
+  const seekBar = $("seek");
+  const next = Number(seekBar.value) + change;
+  seekBar.value = Math.min(Math.max(0, next), Number(seekBar.max));
+  commitSeek();
+  updateTimeDisplay();
 });
 
 // Volume is local on purpose: everyone controls their own
@@ -1074,10 +1180,40 @@ audio.addEventListener("ended", () => {
   }
 });
 
-// The file could not be loaded or decoded (B16): missing, deleted, broken
-audio.addEventListener("error", () => {
+// The file could not be loaded or decoded (B16): missing, deleted, broken.
+// The browser reports a missing file and a damaged one the same way, so we
+// ask the server (a HEAD request, nothing is downloaded) which one it is.
+audio.addEventListener("error", async () => {
   if (!currentSong) return;
-  showError("We couldn't play this song. The file may be missing or damaged, so try another one.");
+  const file = currentSong;
+  const title = titleFromFile(file);
+  const code = audio.error ? audio.error.code : 0;
+  const networkProblem = !!audio.error && code === audio.error.MEDIA_ERR_NETWORK;
+
+  let missing = false;
+  try {
+    const res = await fetch("/music/" + encodeURIComponent(file), { method: "HEAD" });
+    missing = res.status === 404;
+  } catch {
+    // We could not even reach the server, so the file is not "missing"
+  }
+
+  // The user may have picked another song while we were checking
+  if (currentSong !== file) return;
+
+  // Back to "nothing loaded", instead of a player stuck on a song that
+  // cannot play (play button, seek bar and title all go back to idle)
+  clearSong();
+
+  if (missing) {
+    showError(`"${title}" is missing from the server. It may have been deleted, so the song list was refreshed.`);
+    loadSongs(); // the playlist...
+    document.dispatchEvent(new Event("songsChanged")); // ...and the library card
+  } else if (networkProblem) {
+    showError(`The connection dropped while loading "${title}". Check your connection and try again.`);
+  } else {
+    showError(`We couldn't play "${title}". The file may be damaged, so try another one.`);
+  }
 });
 
 // ---------- Playlist (the "library") ----------
@@ -1113,6 +1249,14 @@ function fetchDuration(file) {
 // We use textContent (not innerHTML) for the titles.
 function renderPlaylist() {
   const list = $("playlist");
+
+  // Choosing a song redraws the list. Remember where the keyboard focus was
+  // (the "Play" or "+ Queue" button of a row) so it is not lost.
+  const active = document.activeElement;
+  const focusedRow = active && list.contains(active) ? active.closest(".track") : null;
+  const focusedFile = focusedRow ? focusedRow.dataset.file : null;
+  const focusedAction = focusedRow ? active.dataset.action || "" : "";
+
   list.innerHTML = "";
 
   if (library.length === 0) {
@@ -1129,46 +1273,81 @@ function renderPlaylist() {
     return;
   }
 
-  library.forEach((song) => {
+  // The search box filters the list (by title, ignoring upper/lower case)
+  const query = filterText.trim().toLowerCase();
+  const shown = library.filter((song) => song.title.toLowerCase().includes(query));
+  if (shown.length === 0) {
+    const none = document.createElement("li");
+    none.className = "empty";
+    none.textContent = `No songs match "${filterText.trim()}"`;
+    list.appendChild(none);
+    return;
+  }
+
+  shown.forEach((song) => {
     const li = document.createElement("li");
     li.className = "track" + (song.file === currentSong ? " is-active" : "");
     li.dataset.file = song.file;
-    li.tabIndex = 0;
 
     const info = document.createElement("div");
     info.className = "info";
     const title = document.createElement("div");
     title.className = "track-title";
     title.textContent = song.title;
-    const artist = document.createElement("div");
-    artist.className = "track-artist";
-    artist.textContent = "Your music";
-    info.append(title, artist);
+    info.append(title);
 
     const time = document.createElement("span");
     time.className = "track-time";
     time.textContent = rowTime(song.file);
 
+    // Real buttons, so the keyboard and screen readers can reach them.
+    // (Clicking anywhere else on the row with the mouse still plays it.)
+    const playButton = document.createElement("button");
+    playButton.className = "btn btn-sm";
+    playButton.type = "button";
+    playButton.textContent = "Play";
+    playButton.dataset.action = "play";
+    playButton.setAttribute("aria-label", `Play ${song.title}`);
+    playButton.onclick = (e) => {
+      e.stopPropagation();
+      chooseSong(song.file);
+    };
+
     const queueButton = document.createElement("button");
     queueButton.className = "btn btn-secondary btn-sm";
+    queueButton.type = "button";
     queueButton.textContent = "+ Queue";
-    queueButton.setAttribute("aria-label", "Add to queue");
+    queueButton.dataset.action = "queue";
+    queueButton.setAttribute("aria-label", `Add to queue: ${song.title}`);
     queueButton.onclick = (e) => {
       e.stopPropagation();
       queueSong(song.file);
     };
 
-    li.append(info, time, queueButton);
+    const actions = document.createElement("div");
+    actions.className = "row-actions";
+    actions.append(playButton, queueButton);
+
+    li.append(info, time, actions);
     li.onclick = () => chooseSong(song.file);
-    li.onkeydown = (e) => {
-      if (e.target === li && (e.key === "Enter" || e.key === " ")) {
-        e.preventDefault();
-        chooseSong(song.file);
-      }
-    };
     list.appendChild(li);
   });
+
+  if (focusedFile) {
+    const row = Array.from(list.children).find((r) => r.dataset.file === focusedFile);
+    const target =
+      row &&
+      (row.querySelector(`button[data-action="${focusedAction}"]`) ||
+        row.querySelector("button"));
+    if (target) target.focus();
+  }
 }
+
+// The search box above the list
+$("songSearch").addEventListener("input", () => {
+  filterText = $("songSearch").value;
+  renderPlaylist();
+});
 
 // Fetch /songs and draw the playlist. We call this on page load and again
 // after every successful upload. Returns true if the list was loaded.
@@ -1355,7 +1534,9 @@ readInviteFromUrl();
 
 // ---------- Extra features, each in its own file ----------
 // Each file loads on its own, so they cannot conflict with other work.
-["library.js", "roominfo.js", "visualizer.js"].forEach((file) => {
+// (library.js is no longer loaded: its list, search and buttons now live in
+// the Playlist card, so there is only one song list.)
+["roominfo.js", "visualizer.js"].forEach((file) => {
   const script = document.createElement("script");
   script.src = file;
   document.body.appendChild(script);

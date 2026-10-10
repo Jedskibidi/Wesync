@@ -103,6 +103,7 @@
     }
 
     copyButton.textContent = "Copied!";
+    showToast("Invite link copied"); // also read out by screen readers
     clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
       copyButton.textContent = "Copy invite link";
