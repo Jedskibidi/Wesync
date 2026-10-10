@@ -469,3 +469,33 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 }
 .tag-you { background: var(--surface); }
 .tag-host { background: var(--honey); }
+
+/* ---------- Toasts ("Jed paused", "Sam joined") ---------- */
+.toasts {
+  position: fixed; right: 16px; bottom: 16px; z-index: 20;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  pointer-events: none;
+}
+.toast {
+  background: var(--surface); color: var(--ink);
+  border: 3px solid var(--ink); border-radius: 12px;
+  padding: 0.5rem 0.9rem;
+  font-family: var(--font-heading); font-weight: 600;
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- Connection indicator: a dot before the word ---------- */
+#status::before {
+  content: "";
+  display: inline-block;
+  width: 0.6em; height: 0.6em; margin-right: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+}
+#status[data-state="connected"] { color: #3f9142; }
+#status[data-state="reconnecting"] { color: #d98a00; }
+#status[data-state="offline"] { color: var(--danger); }

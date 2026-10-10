@@ -512,10 +512,79 @@ function applyState(state, justJoined = false) {
   syncAudioToRoom();
 }
 
+// ---------- Remote updates, toasts and connection state ----------
+
+// true while we are applying something that came FROM the server. Anything
+// that would send to the server goes through sendToRoom(), which refuses to
+// send while this is true, so a remote update can never be echoed back.
+let isRemoteUpdate = false;
+
+function applyRemote(fn) {
+  const before = isRemoteUpdate;
+  isRemoteUpdate = true;
+  try {
+    fn();
+  } finally {
+    isRemoteUpdate = before;
+  }
+}
+
+// The only way the player sends play, pause, seek or changeSong.
+// Real user actions only: not while applying a remote update, not outside a room.
+function sendToRoom(event, data) {
+  if (isRemoteUpdate || !inRoom) return;
+  socket.emit(event, data);
+}
+
+// A small message in the corner that goes away by itself
+const TOAST_VISIBLE_MS = 3000;
+const MAX_TOASTS = 4;
+
+function showToast(text) {
+  let box = $("toasts");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "toasts";
+    box.className = "toasts";
+    box.setAttribute("role", "status");
+    box.setAttribute("aria-live", "polite");
+    document.body.appendChild(box);
+  }
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.textContent = text; // textContent: a nickname can never inject HTML
+  box.appendChild(toast);
+  while (box.children.length > MAX_TOASTS) box.firstChild.remove();
+  setTimeout(() => toast.remove(), TOAST_VISIBLE_MS);
+}
+
+// Who was in the room the last time we looked, to toast joins and leaves
+let knownMembers = [];
+
+function announceMembers(members) {
+  members
+    .filter((name) => !knownMembers.includes(name) && name !== submittedNickname)
+    .forEach((name) => showToast(`${name} joined`));
+  knownMembers
+    .filter((name) => !members.includes(name) && name !== submittedNickname)
+    .forEach((name) => showToast(`${name} left`));
+  knownMembers = [...members];
+}
+
+// The connection indicator: "connected", "reconnecting" or "offline"
+let everConnected = false;
+
+function setConnection(state) {
+  const label = $("status");
+  label.textContent = state;
+  label.dataset.state = state; // the CSS colors the dot from this
+}
+
 // ---------- Messages from the server ----------
 
 socket.on("connect", () => {
-  $("status").textContent = "connected";
+  everConnected = true;
+  setConnection("connected");
 
   // Connection came back after a drop: the server forgot us, so rejoin.
   if (lastRoom) {
@@ -525,8 +594,10 @@ socket.on("connect", () => {
   }
 });
 
-socket.on("disconnect", () => {
-  $("status").textContent = "disconnected";
+socket.on("disconnect", (reason) => {
+  // These two reasons mean the browser will NOT try again by itself
+  const final = reason === "io client disconnect" || reason === "io server disconnect";
+  setConnection(final ? "offline" : "reconnecting");
   inRoom = false;
   waitingForClick = false;
   hideOverlay();
@@ -544,7 +615,8 @@ socket.on("disconnect", () => {
 
 // The server could not be reached at all
 socket.on("connect_error", () => {
-  $("status").textContent = "can't reach the server";
+  // Never connected: nothing to reconnect to yet. Connected before: retrying.
+  setConnection(everConnected ? "reconnecting" : "offline");
 });
 
 socket.on("roomState", (state) => {
@@ -554,10 +626,12 @@ socket.on("roomState", (state) => {
   rejoining = false;
   pendingAction = null;
   lastRoom = { code: state.code, nickname: submittedNickname };
-  applyState(state, justJoined);
+  knownMembers = [...state.members]; // our own join is not toasted
+  applyRemote(() => applyState(state, justJoined));
 });
 
 socket.on("membersUpdate", (data) => {
+  announceMembers(data.members);
   showMembers(data.members, data.host);
 });
 
@@ -588,31 +662,41 @@ socket.on("roomError", (err) => {
 
 // Someone else pressed a button. We only change our own audio here.
 // We do NOT send anything back, so no echo loops are possible.
-socket.on("play", ({ position }) => {
-  remember(position, true);
-  syncAudioToRoom();
+socket.on("play", ({ position, by }) => {
+  applyRemote(() => {
+    remember(position, true);
+    syncAudioToRoom();
+  });
+  if (by) showToast(`${by} played`);
 });
 
-socket.on("pause", ({ position }) => {
-  remember(position, false);
-  syncAudioToRoom();
+socket.on("pause", ({ position, by }) => {
+  applyRemote(() => {
+    remember(position, false);
+    syncAudioToRoom();
+  });
+  if (by) showToast(`${by} paused`);
 });
 
 socket.on("seek", ({ position }) => {
-  remember(position, playback.isPlaying);
-  syncAudioToRoom();
+  applyRemote(() => {
+    remember(position, playback.isPlaying);
+    syncAudioToRoom();
+  });
 });
 
 // "by" is the nickname of the person who picked the song (if the server sends it)
 socket.on("changeSong", ({ song, by }) => {
-  loadSong(song, by || null);
-  remember(0, false);
-  syncAudioToRoom(); // the file is still loading, so this waits for metadata
+  applyRemote(() => {
+    loadSong(song, by || null);
+    remember(0, false);
+    syncAudioToRoom(); // the file is still loading, so this waits for metadata
+  });
 });
 
 // Drift correction (F13): the server tells us every few seconds where the
 // song should be. If we are off by more than 0.3 s, jump to the right spot.
-socket.on("syncTick", ({ position, isPlaying }) => {
+function handleSyncTick({ position, isPlaying }) {
   if (!inRoom || !currentSong) return;
 
   remember(position, isPlaying);
@@ -630,6 +714,17 @@ socket.on("syncTick", ({ position, isPlaying }) => {
   if (Math.abs(drift) > DRIFT_LIMIT_SECONDS) {
     seekTo(position);
   }
+}
+
+socket.on("syncTick", (tick) => applyRemote(() => handleSyncTick(tick)));
+
+socket.io.on("reconnect_attempt", () => setConnection("reconnecting"));
+socket.io.on("reconnect_failed", () => setConnection("offline"));
+
+// The browser knows when the network itself goes away
+window.addEventListener("offline", () => setConnection("offline"));
+window.addEventListener("online", () => {
+  if (!socket.connected) setConnection("reconnecting");
 });
 
 // ---------- Our own buttons: change our audio AND tell the server ----------
@@ -738,10 +833,8 @@ function chooseSong(file) {
   loadSong(file, inRoom ? submittedNickname : null);
   remember(0, true);
   playAudio();
-  if (inRoom) {
-    socket.emit("changeSong", { song: file });
-    socket.emit("play", { position: 0 });
-  }
+  sendToRoom("changeSong", { song: file });
+  sendToRoom("play", { position: 0 });
 }
 
 // The server answers with queueUpdate, which redraws the list for everyone
@@ -757,11 +850,11 @@ $("playPause").onclick = () => {
     if (audio.ended) seekTo(0); // song finished: play from the start
     remember(audio.currentTime, true);
     playAudio();
-    if (inRoom) socket.emit("play", { position: audio.currentTime });
+    sendToRoom("play", { position: audio.currentTime });
   } else {
     audio.pause();
     remember(audio.currentTime, false);
-    if (inRoom) socket.emit("pause", { position: audio.currentTime });
+    sendToRoom("pause", { position: audio.currentTime });
   }
 };
 
@@ -813,7 +906,7 @@ $("seek").addEventListener("change", () => {
   const position = Number($("seek").value);
   remember(position, playback.isPlaying);
   seekTo(position);
-  if (inRoom) socket.emit("seek", { position });
+  sendToRoom("seek", { position });
 });
 
 // Volume is local on purpose: everyone controls their own

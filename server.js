@@ -391,7 +391,10 @@ io.on("connection", (socket) => {
       isPlaying: true,
       position: cleanPosition(data.position),
     });
-    socket.to(room.code).emit("play", { position: room.position });
+    socket.to(room.code).emit("play", {
+      position: room.position,
+      by: room.members.get(socket.id) || null, // for the "Jed played" toast
+    });
   });
 
   // pause {position}  (position is optional)
@@ -402,7 +405,10 @@ io.on("connection", (socket) => {
       isPlaying: false,
       position: cleanPosition(data.position),
     });
-    socket.to(room.code).emit("pause", { position: room.position });
+    socket.to(room.code).emit("pause", {
+      position: room.position,
+      by: room.members.get(socket.id) || null, // for the "Jed paused" toast
+    });
   });
 
   // seek {position}  (B10)
