@@ -55,7 +55,7 @@ const ROOM_GRACE_MS = numberFromEnv("ROOM_GRACE_SECONDS", 180) * 1000;
 
 // ---- Private room: a room with a fixed code and a password ----
 // It is created every time the server starts and is never deleted when it
-// empties. Set BOTH variables to turn it on (on your host's settings page, or
+// empties (but its songs are removed after it has been empty for a while). Set BOTH variables to turn it on (on your host's settings page, or
 // in a local .env file):
 //   PRIVATE_ROOM_CODE=LOVE            (4 letters or numbers)
 //   PRIVATE_ROOM_PASSWORD=something-only-you-know
@@ -147,12 +147,12 @@ function createRoom(code, socketId, nickname) {
     songChangedAt: 0, // B15: when the current song last changed (ms)
     tickTimer: null, // B13: the interval that sends syncTick
     maxSongs: MAX_SONGS_PER_ROOM, // most songs this room can upload
-    permanent: false, // true = never deleted when empty (the private room)
+    permanent: false, // true = room never deleted when empty, only its songs (the private room)
     password: null, // set = people must give it to join
     songs: new Map(), // uploaded songs: file -> { file, title, added, size }
     bytes: 0, // disk space used by this room's songs
     pendingUploads: 0, // uploads that are still arriving
-    deleteTimer: null, // runs destroyRoom() a while after the room empties
+    deleteTimer: null, // runs destroyRoom() (or clearRoomSongs() for the private room) a while after the room empties
     destroyed: false,
   };
 }
@@ -172,11 +172,49 @@ function destroyRoom(room) {
     { recursive: true, force: true, maxRetries: 5, retryDelay: 200 },
     (err) => {
       if (err) {
-        console.error(`Could not delete the songs of room ${room.code}:`, err.message);
+        console.error(
+          `Could not delete the songs of room ${room.code}:`,
+          err.message,
+        );
       }
     },
   );
   console.log(`Room ${room.code} deleted (${room.songs.size} song(s) removed)`);
+}
+
+// Delete a room's songs but keep the room itself (used by the private room)
+function clearRoomSongs(room) {
+  // Someone came back, or an upload is still arriving: do nothing
+  if (room.destroyed || room.members.size > 0 || room.pendingUploads > 0)
+    return;
+
+  room.deleteTimer = null;
+  totalBytes = Math.max(0, totalBytes - room.bytes);
+  const count = room.songs.size;
+  room.songs.clear();
+  room.bytes = 0;
+  room.queue = [];
+  room.history = [];
+  room.currentSong = null;
+  room.pickedBy = null;
+  room.isPlaying = false;
+  room.position = 0;
+
+  fs.rm(
+    roomDir(room.code),
+    { recursive: true, force: true, maxRetries: 5, retryDelay: 200 },
+    (err) => {
+      if (err) {
+        console.error(
+          `Could not delete the songs of room ${room.code}:`,
+          err.message,
+        );
+      }
+    },
+  );
+  console.log(
+    `Room ${room.code} stays open, but ${count} song(s) were removed`,
+  );
 }
 
 // Someone is back in a room that was about to be deleted
@@ -309,10 +347,14 @@ function leaveCurrentRoom(socket) {
     // page refresh or a dropped connection does not delete everything.
     stopTicks(room); // B13: no members, so no timer
     updateRoom(room, { isPlaying: false }); // freeze the song position
+    clearTimeout(room.deleteTimer);
     if (room.permanent) {
-      console.log(`Room ${code} is empty, it stays open (private room)`);
+      // Private room: the room stays open, but its songs are removed
+      room.deleteTimer = setTimeout(() => clearRoomSongs(room), ROOM_GRACE_MS);
+      console.log(
+        `Room ${code} is empty, its songs will be removed in ${Math.round(ROOM_GRACE_MS / 1000)}s unless someone joins (the room stays open)`,
+      );
     } else {
-      clearTimeout(room.deleteTimer);
       room.deleteTimer = setTimeout(() => destroyRoom(room), ROOM_GRACE_MS);
       console.log(
         `Room ${code} is empty, it will be deleted in ${Math.round(ROOM_GRACE_MS / 1000)}s unless someone joins`,
@@ -461,7 +503,9 @@ const storage = multer.diskStorage({
         .replace(/\s+/g, "-") || "song";
     // Two uploads in the same millisecond must not get the same name
     let stamp = Date.now();
-    while (fs.existsSync(path.join(roomDir(req.room.code), `${stamp}-${base}.mp3`))) {
+    while (
+      fs.existsSync(path.join(roomDir(req.room.code), `${stamp}-${base}.mp3`))
+    ) {
       stamp++;
     }
     cb(null, `${stamp}-${base}.mp3`);
@@ -639,7 +683,8 @@ io.on("connection", (socket) => {
       }
       if (passwordsLocked()) {
         return socket.emit("roomError", {
-          message: "Too many wrong passwords, please wait a minute and try again",
+          message:
+            "Too many wrong passwords, please wait a minute and try again",
         });
       }
       if (!samePassword(given, room.password)) {
