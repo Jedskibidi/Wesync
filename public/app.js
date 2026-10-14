@@ -804,12 +804,20 @@ socket.on("activity", ({ type, by, title }) => {
 // Jumping around in a song can fire many times in a row (for example when
 // someone holds an arrow key), so we wait a moment and show only the last one
 let seekToastTimer = null;
+let seekFrom = 0; // where the song was when the jump started
 
-function toastSeek(by, position) {
+// "before" is where the room was just before the jump, so we can tell if
+// the song was moved forward or backward
+function toastSeek(by, position, before) {
   if (!by) return;
+  if (seekToastTimer === null) seekFrom = before; // first jump of a series
   clearTimeout(seekToastTimer);
   seekToastTimer = setTimeout(() => {
-    showToast(`${by} jumped to ${formatTime(position)}`);
+    seekToastTimer = null;
+    const time = formatTime(position);
+    if (position > seekFrom + 0.5) showToast(`${by} forwarded the song to ${time}`);
+    else if (position < seekFrom - 0.5) showToast(`${by} rewound the song to ${time}`);
+    else showToast(`${by} jumped to ${time}`);
   }, 600);
 }
 
@@ -952,11 +960,12 @@ socket.on("pause", ({ position, by }) => {
 });
 
 socket.on("seek", ({ position, by }) => {
+  const before = expectedPosition(); // where the room was before this jump
   applyRemote(() => {
     remember(position, playback.isPlaying);
     syncAudioToRoom();
   });
-  toastSeek(by, position);
+  toastSeek(by, position, before);
 });
 
 // "by" is the nickname of the person who picked the song (if the server sends it)
