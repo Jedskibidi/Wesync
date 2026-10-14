@@ -470,21 +470,28 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 .tag-you { background: var(--surface); }
 .tag-host { background: var(--honey); }
 
-/* ---------- Toasts ("Jed paused", "Sam joined") ---------- */
+/* ---------- Toasts ("Jed paused", "Sam joined") ----------
+   Top center of the screen, on every screen size, so they are always where
+   you are looking (the bottom edge can be hidden by a phone's browser bar). */
 .toasts {
-  position: fixed; right: 16px; bottom: 16px; z-index: 20;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  position: fixed; z-index: 20;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: 12px; right: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
   pointer-events: none;
 }
 .toast {
+  max-width: min(100%, 440px);
   background: var(--surface); color: var(--ink);
   border: 3px solid var(--ink); border-radius: 12px;
+  box-shadow: 0 4px 0 var(--ink);
   padding: 0.5rem 0.9rem;
   font-family: var(--font-heading); font-weight: 600;
+  text-align: center; overflow-wrap: anywhere;
   animation: toast-in 0.2s ease-out;
 }
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: none; }
 }
 
@@ -540,14 +547,6 @@ select.input { padding-right: 0.5rem; text-overflow: ellipsis; }
 @media (max-width: 420px) {
   /* The search box gets its own row so its hint is not cut off */
   #library .field-row .input { flex: 1 1 100%; }
-}
-
-@media (max-width: 760px) {
-  /* Toasts across the bottom, clear of the phone's home bar */
-  .toasts {
-    left: 12px; right: 12px; align-items: center;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  }
 }
 
 
