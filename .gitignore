@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# Songs are uploaded per room while the app runs: never commit them
+music/*
+!music/.gitkeep

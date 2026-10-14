@@ -170,10 +170,20 @@
   // ---------- Loading the list ----------
 
   function loadLibrary() {
+    // Songs belong to a room (roomQuery() comes from app.js). Outside a
+    // room there is nothing to load.
+    const query = roomQuery();
+    if (!query) {
+      songs = [];
+      loadState = "ready";
+      render();
+      return;
+    }
+
     loadState = "loading";
     render();
 
-    fetch("/songs")
+    fetch("/songs" + query)
       .then((res) => {
         if (!res.ok) throw new Error("Bad response from /songs");
         return res.json();

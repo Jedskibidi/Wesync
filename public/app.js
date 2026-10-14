@@ -24,6 +24,7 @@ let waitingForClick = false;
 
 // Rejoin after a lost connection (B16)
 let submittedNickname = ""; // the nickname we last used to create/join
+let submittedPassword = ""; // the room password we last used (kept to rejoin)
 let lastRoom = null; // { code, nickname } of the room we are in
 let rejoining = false; // true while we wait for the server to take us back
 let pendingAction = null; // "create" or "join" while we wait for the server
@@ -37,6 +38,29 @@ let songsFailed = false; // true if /songs could not be loaded
 // Song lengths in seconds, by file name (null while we are still loading it)
 const durations = new Map();
 let filterText = ""; // what is typed in the song search box
+let songsRoomCode = null; // the room the current song list belongs to
+
+// ---------- Songs live in the room ----------
+// Every room has its own songs (the server keeps them in music/<ROOM>/ and
+// deletes them when the room closes), so song addresses and the song list
+// always need the room code.
+
+function roomCodeNow() {
+  return lastRoom ? lastRoom.code : null;
+}
+
+// "/music/AB12/<file>": where the audio of a song is
+function songUrl(file) {
+  return "/music/" + roomCodeNow() + "/" + encodeURIComponent(file);
+}
+
+// "?room=AB12&sid=<our socket id>": the server uses it to check that we are
+// really in that room. Empty when we are not in a room.
+function roomQuery() {
+  const code = roomCodeNow();
+  if (!code || !socket.id) return "";
+  return `?room=${encodeURIComponent(code)}&sid=${encodeURIComponent(socket.id)}`;
+}
 
 // ---------- Small helpers ----------
 
@@ -105,6 +129,9 @@ function friendlyError(raw) {
     [/^Room (\w+) not found/i, (m) => `We couldn't find room ${m[1].toUpperCase()}. Check the code and try again.`],
     [/nickname.*already taken/i, () => "Someone in this room already uses that nickname. Please pick another one."],
     [/^Please enter a nickname/i, () => "Please enter a nickname."],
+    [/needs a password/i, () => "This room is protected. Please enter its password."],
+    [/too many wrong passwords/i, () => "Too many wrong passwords. Please wait a minute and try again."],
+    [/wrong password/i, () => "That password isn't right. Please try again."],
     [/room code has 4/i, () => "A room code has 4 letters or numbers."],
     [/not in a room/i, () => "You're not in a room right now. Create or join one first."],
     [/^Pick a song first/i, () => "Pick a song first."],
@@ -244,12 +271,18 @@ function clearFieldError(field) {
 function clearFieldErrors() {
   clearFieldError("nickname");
   clearFieldError("code");
+  clearFieldError("roomPassword");
 }
 
 // An error from the server while we are on the first screen:
 // put it under the field it is about.
 function showLandingError(text) {
-  if (/nickname/i.test(text)) {
+  if (/password/i.test(text)) {
+    // The room is protected: show the password box under the room code
+    $("passwordRow").hidden = false;
+    showFieldError("roomPassword", text);
+    $("roomPassword").focus();
+  } else if (/nickname/i.test(text)) {
     showFieldError("nickname", text);
   } else if (pendingAction === "join") {
     showFieldError("code", text);
@@ -277,6 +310,8 @@ function showRoomView() {
   // Same idea: the "Create Room" / "Join Room" button is about to disappear
   const hadFocus = $("roomSection").contains(document.activeElement);
   $("roomSection").hidden = true;
+  $("passwordRow").hidden = true;
+  $("roomPassword").value = "";
   $("inviteHint").hidden = true;
   $("roomInfo").hidden = false;
   $("memberPanel").hidden = false;
@@ -584,7 +619,7 @@ function resetPlayerDisplay() {
 function loadSong(file, by = null) {
   currentSong = file;
   pickedBy = by;
-  audio.src = "/music/" + encodeURIComponent(file);
+  audio.src = songUrl(file);
   audio.load();
   audio.pause();
   resetPlayerDisplay();
@@ -805,7 +840,13 @@ socket.on("roomState", (state) => {
   clearFieldErrors();
   rejoining = false;
   pendingAction = null;
-  lastRoom = { code: state.code, nickname: submittedNickname };
+  lastRoom = {
+    code: state.code,
+    nickname: submittedNickname,
+    password: submittedPassword,
+  };
+  // A new room has its own songs (also retry if the last load failed)
+  if (state.code !== songsRoomCode || songsFailed) loadSongs();
   knownMembers = [...state.members]; // our own join is not toasted
   applyRemote(() => applyState(state, justJoined));
 });
@@ -819,6 +860,15 @@ socket.on("queueUpdate", ({ queue }) => {
   renderQueue(queue);
 });
 
+// Somebody in the room uploaded a song: refresh the playlist and library card
+socket.on("songsUpdate", () => {
+  loadSongs();
+  document.dispatchEvent(new Event("songsChanged"));
+});
+
+// We left the room: its songs are gone for us too
+document.addEventListener("roomLeft", () => loadSongs());
+
 socket.on("roomError", (err) => {
   stopRoomLoading();
   const text = friendlyError(err && err.message);
@@ -827,6 +877,7 @@ socket.on("roomError", (err) => {
     // The server did not take us back (for example the room is gone)
     rejoining = false;
     lastRoom = null;
+    loadSongs(); // the room's songs went with it
     clearUrl();
     showLanding();
     showError("We couldn't take you back to your room. It may have closed, so please create or join a room again.");
@@ -950,6 +1001,7 @@ function startCreate() {
   rejoining = false;
   pendingAction = "create";
   submittedNickname = nickname;
+  submittedPassword = "";
   socket.emit("createRoom", { nickname });
   startRoomLoading("Creating your room...");
 }
@@ -968,7 +1020,8 @@ function startJoin() {
   rejoining = false;
   pendingAction = "join";
   submittedNickname = nickname;
-  socket.emit("joinRoom", { code, nickname });
+  submittedPassword = $("roomPassword").value;
+  socket.emit("joinRoom", { code, nickname, password: submittedPassword });
   startRoomLoading(`Joining room ${code}...`);
 }
 
@@ -987,7 +1040,13 @@ $("code").addEventListener("keydown", (e) => {
   if (e.key === "Enter") startJoin();
 });
 
+// Enter in the password box: join
+$("roomPassword").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startJoin();
+});
+
 // Typing in a field removes its error
+$("roomPassword").addEventListener("input", () => clearFieldError("roomPassword"));
 $("nickname").addEventListener("input", () => clearFieldError("nickname"));
 $("code").addEventListener("input", () => {
   $("code").value = $("code").value.toUpperCase();
@@ -1192,7 +1251,7 @@ audio.addEventListener("error", async () => {
 
   let missing = false;
   try {
-    const res = await fetch("/music/" + encodeURIComponent(file), { method: "HEAD" });
+    const res = await fetch(songUrl(file), { method: "HEAD" });
     missing = res.status === 404;
   } catch {
     // We could not even reach the server, so the file is not "missing"
@@ -1242,7 +1301,7 @@ function fetchDuration(file) {
     durations.set(file, probe.duration);
     showRowDuration(file);
   };
-  probe.src = "/music/" + encodeURIComponent(file);
+  probe.src = songUrl(file);
 }
 
 // Draw the playlist. The song that is loaded gets the honey row with the bee.
@@ -1266,6 +1325,8 @@ function renderPlaylist() {
       empty.append(makeSpinner(), "Loading songs...");
     } else if (songsFailed) {
       empty.textContent = "We couldn't load your songs. Check your connection and refresh the page.";
+    } else if (!roomCodeNow()) {
+      empty.textContent = "Create or join a room to add songs. Songs belong to the room.";
     } else {
       empty.textContent = "No songs yet. Add your mp3 files.";
     }
@@ -1349,15 +1410,31 @@ $("songSearch").addEventListener("input", () => {
   renderPlaylist();
 });
 
-// Fetch /songs and draw the playlist. We call this on page load and again
-// after every successful upload. Returns true if the list was loaded.
+// Fetch /songs and draw the playlist. We call this when we enter a room, and
+// again after every upload. Outside a room there are no songs. Returns true
+// if the list was loaded.
 async function loadSongs() {
+  const code = roomCodeNow();
+  songsRoomCode = code;
+
+  if (!code) {
+    library = [];
+    songsLoading = false;
+    songsFailed = false;
+    renderPlaylist();
+    updateLcdTitle();
+    return true;
+  }
+
   songsLoading = true;
   renderPlaylist();
   try {
-    const res = await fetch("/songs");
+    const res = await fetch("/songs" + roomQuery());
     if (!res.ok) throw new Error("Bad response from /songs");
     const songs = await res.json();
+
+    // We may have left or changed room while the answer was on its way
+    if (code !== roomCodeNow()) return false;
 
     library = Array.isArray(songs) ? songs : [];
     songsLoading = false;
@@ -1422,12 +1499,22 @@ async function uploadFailureReason(res) {
     return `it's too big (max ${MAX_UPLOAD_MB} MB)`;
   }
   if (/only mp3/i.test(reason)) return "it isn't an MP3 file";
+  if (res.status === 403) return "you're not in this room anymore, please rejoin and try again";
+  if (res.status === 409 || /song limit/i.test(reason)) return "this room has reached its song limit";
+  if (res.status === 429 || /too many uploads/i.test(reason)) return "too many uploads, wait a minute and try again";
+  if (res.status === 507 || /storage is full/i.test(reason)) return "the server is out of space right now";
+  if (res.status === 410 || /room has closed/i.test(reason)) return "the room has closed";
   if (res.status >= 500) return "the server had a problem, please try again";
   return "the upload didn't work, please try again";
 }
 
 async function uploadFiles(fileList) {
   if (uploading) return;
+
+  if (!inRoom || !roomCodeNow()) {
+    setUploadStatus("Create or join a room first. Songs belong to the room.", "error");
+    return;
+  }
 
   const good = [];
   const problems = [];
@@ -1453,7 +1540,7 @@ async function uploadFiles(fileList) {
     try {
       const formData = new FormData();
       formData.append(UPLOAD_FIELD, file, file.name);
-      const res = await fetch("/upload", { method: "POST", body: formData });
+      const res = await fetch("/upload" + roomQuery(), { method: "POST", body: formData });
       if (res.ok) {
         uploaded++;
       } else {

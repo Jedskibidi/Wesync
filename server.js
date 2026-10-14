@@ -2,8 +2,20 @@ const express = require("express");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const multer = require("multer");
 const { Server } = require("socket.io");
+
+// Optional local settings file. .env is in .gitignore, so passwords stay out
+// of GitHub. Settings already set by the host (Render, ...) are not replaced.
+// (process.loadEnvFile needs Node 20.12 or newer; older Node just skips this.)
+if (typeof process.loadEnvFile === "function") {
+  try {
+    process.loadEnvFile(path.join(__dirname, ".env"));
+  } catch {
+    // no .env file: fine
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +24,75 @@ const io = new Server(server);
 const PORT = process.env.PORT || 3000;
 const MUSIC_DIR = path.join(__dirname, "music");
 fs.mkdirSync(MUSIC_DIR, { recursive: true });
+
+// ---- Per-room songs ----
+// Uploaded songs live in music/<ROOMCODE>/ and belong to that room only.
+// A room's folder is deleted when the room closes, and every room folder is
+// wiped when the server starts. The limits below can be changed with
+// environment variables, for example:  MAX_SONGS_PER_ROOM=10 npm start
+const ROOM_CODE_RE = /^[A-Z0-9]{4}$/;
+
+function numberFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+// Most songs one room can upload
+const MAX_SONGS_PER_ROOM = numberFromEnv("MAX_SONGS_PER_ROOM", 20);
+
+// Biggest single file, in bytes (the page checks the same 20 MB)
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+
+// Most disk space all rooms together may use, in bytes
+const MAX_TOTAL_BYTES = numberFromEnv("MAX_TOTAL_MB", 2048) * 1024 * 1024;
+
+// Most uploads one person can start per minute
+const MAX_UPLOADS_PER_MINUTE = numberFromEnv("MAX_UPLOADS_PER_MINUTE", 20);
+
+// An empty room (and its songs) is kept this long before it is deleted, so a
+// page refresh or a short network drop does not wipe everything
+const ROOM_GRACE_MS = numberFromEnv("ROOM_GRACE_SECONDS", 180) * 1000;
+
+// ---- Private room: a room with a fixed code and a password ----
+// It is created every time the server starts and is never deleted when it
+// empties. Set BOTH variables to turn it on (on your host's settings page, or
+// in a local .env file):
+//   PRIVATE_ROOM_CODE=LOVE            (4 letters or numbers)
+//   PRIVATE_ROOM_PASSWORD=something-only-you-know
+const PRIVATE_ROOM_CODE = String(process.env.PRIVATE_ROOM_CODE || "")
+  .trim()
+  .toUpperCase();
+const PRIVATE_ROOM_PASSWORD = String(process.env.PRIVATE_ROOM_PASSWORD || "");
+const PRIVATE_ROOM_MAX_SONGS = numberFromEnv("PRIVATE_ROOM_MAX_SONGS", 50);
+
+// After this many wrong passwords in one minute (from anyone), the private
+// room refuses every attempt for a while, so the password cannot be guessed
+const MAX_WRONG_PASSWORDS_PER_MINUTE = 10;
+
+let totalBytes = 0; // bytes stored by all rooms together
+let pendingBytes = 0; // bytes of uploads that are still arriving
+
+function roomDir(code) {
+  return path.join(MUSIC_DIR, code);
+}
+
+// Delete every room folder inside music/ (other files there are left alone)
+function wipeRoomFolders() {
+  for (const entry of fs.readdirSync(MUSIC_DIR, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !ROOM_CODE_RE.test(entry.name)) continue;
+    try {
+      fs.rmSync(path.join(MUSIC_DIR, entry.name), {
+        recursive: true,
+        force: true,
+      });
+    } catch (err) {
+      console.error(`Could not delete music/${entry.name}:`, err.message);
+    }
+  }
+}
+
+// Songs from before a restart belong to rooms that no longer exist
+wipeRoomFolders();
 
 // How often every room sends a syncTick (B13), in milliseconds
 const TICK_INTERVAL_MS = 4000;
@@ -27,52 +108,6 @@ const SONG_END_GUARD_MS = 2000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use("/music", express.static(MUSIC_DIR));
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, MUSIC_DIR),
-  filename: (req, file, cb) => {
-    const base =
-      path
-        .basename(file.originalname, path.extname(file.originalname))
-        .replace(/[^a-zA-Z0-9 _-]/g, "")
-        .trim()
-        .replace(/\s+/g, "-") || "song";
-    cb(null, `${Date.now()}-${base}.mp3`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 20 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const okTypes = ["audio/mpeg", "audio/mp3", "application/octet-stream", ""];
-    if (ext !== ".mp3" || !okTypes.includes(file.mimetype)) {
-      return cb(new Error("Only MP3 files are allowed"));
-    }
-    cb(null, true);
-  },
-});
-
-app.post("/upload", (req, res) => {
-  // any() accepts the file under any field name; the filter above still
-  // makes sure only .mp3 files get saved.
-  upload.any()(req, res, (err) => {
-    if (err instanceof multer.MulterError) {
-      const msg =
-        err.code === "LIMIT_FILE_SIZE"
-          ? "File too large (max 20 MB)"
-          : err.message;
-      return res.status(400).json({ ok: false, error: msg });
-    }
-    if (err) return res.status(400).json({ ok: false, error: err.message });
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ ok: false, error: "No file uploaded" });
-    }
-    res.json({ ok: true, file: req.files[0].filename });
-  });
-});
 
 // "1700000000000-Magnolia-Remix.mp3" -> "Magnolia Remix"
 function songTitle(file) {
@@ -81,39 +116,6 @@ function songTitle(file) {
     .replace(/^\d{10,}-/, "")
     .replace(/-/g, " ");
 }
-
-// Returns the clean file name if it is a real mp3 in music/, otherwise null.
-// basename() blocks tricks like "../server.js".
-function validSongFile(value) {
-  const file = path.basename(String(value || ""));
-  const ok =
-    file.toLowerCase().endsWith(".mp3") &&
-    fs.existsSync(path.join(MUSIC_DIR, file));
-  return ok ? file : null;
-}
-
-app.get("/songs", (req, res) => {
-  try {
-    const files = fs
-      .readdirSync(MUSIC_DIR)
-      .filter((f) => f.toLowerCase().endsWith(".mp3"));
-
-    const songs = files
-      .map((file) => {
-        const added = fs.statSync(path.join(MUSIC_DIR, file)).mtimeMs;
-        return { file, title: songTitle(file), added };
-      })
-      .sort((a, b) => b.added - a.added)
-      .map(({ file, title }) => ({ file, title }));
-
-    res.json(songs);
-  } catch (err) {
-    console.error("Could not read the music folder:", err);
-    res
-      .status(500)
-      .json({ ok: false, error: "Could not read the music folder" });
-  }
-});
 
 // Rooms (B6 + B7 + B8)
 const rooms = new Map();
@@ -133,7 +135,7 @@ function generateRoomCode() {
 function createRoom(code, socketId, nickname) {
   return {
     code,
-    members: new Map([[socketId, nickname]]),
+    members: socketId ? new Map([[socketId, nickname]]) : new Map(),
     currentSong: null,
     pickedBy: null, // nickname of whoever picked the current song
     isPlaying: false,
@@ -144,7 +146,44 @@ function createRoom(code, socketId, nickname) {
     history: [], // B15: songs played before, oldest first: { file, by }
     songChangedAt: 0, // B15: when the current song last changed (ms)
     tickTimer: null, // B13: the interval that sends syncTick
+    maxSongs: MAX_SONGS_PER_ROOM, // most songs this room can upload
+    permanent: false, // true = never deleted when empty (the private room)
+    password: null, // set = people must give it to join
+    songs: new Map(), // uploaded songs: file -> { file, title, added, size }
+    bytes: 0, // disk space used by this room's songs
+    pendingUploads: 0, // uploads that are still arriving
+    deleteTimer: null, // runs destroyRoom() a while after the room empties
+    destroyed: false,
   };
+}
+
+// Close a room for good: stop its timers and delete its songs from the disk.
+function destroyRoom(room) {
+  if (room.destroyed) return;
+  room.destroyed = true;
+  clearTimeout(room.deleteTimer);
+  room.deleteTimer = null;
+  stopTicks(room);
+  rooms.delete(room.code);
+  totalBytes = Math.max(0, totalBytes - room.bytes);
+
+  fs.rm(
+    roomDir(room.code),
+    { recursive: true, force: true, maxRetries: 5, retryDelay: 200 },
+    (err) => {
+      if (err) {
+        console.error(`Could not delete the songs of room ${room.code}:`, err.message);
+      }
+    },
+  );
+  console.log(`Room ${room.code} deleted (${room.songs.size} song(s) removed)`);
+}
+
+// Someone is back in a room that was about to be deleted
+function keepRoom(room) {
+  clearTimeout(room.deleteTimer);
+  room.deleteTimer = null;
+  startTicks(room);
 }
 
 // The real position right now. While playing, time keeps moving.
@@ -266,9 +305,19 @@ function leaveCurrentRoom(socket) {
 
   room.members.delete(socket.id);
   if (room.members.size === 0) {
+    // Nobody is left. Keep the room and its songs for a short while, so a
+    // page refresh or a dropped connection does not delete everything.
     stopTicks(room); // B13: no members, so no timer
-    rooms.delete(code);
-    console.log(`Room ${code} deleted (empty), ticks stopped`);
+    updateRoom(room, { isPlaying: false }); // freeze the song position
+    if (room.permanent) {
+      console.log(`Room ${code} is empty, it stays open (private room)`);
+    } else {
+      clearTimeout(room.deleteTimer);
+      room.deleteTimer = setTimeout(() => destroyRoom(room), ROOM_GRACE_MS);
+      console.log(
+        `Room ${code} is empty, it will be deleted in ${Math.round(ROOM_GRACE_MS / 1000)}s unless someone joins`,
+      );
+    }
   } else {
     io.to(code).emit("membersUpdate", membersPayload(room));
   }
@@ -287,6 +336,224 @@ function cleanPosition(value) {
     ? Math.max(0, value)
     : undefined;
 }
+
+// ---- Room passwords ----
+
+// Compare two passwords without leaking how many letters matched
+function samePassword(given, expected) {
+  const a = crypto.createHash("sha256").update(given).digest();
+  const b = crypto.createHash("sha256").update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+const wrongPasswordTimes = []; // when the recent wrong passwords happened
+
+function passwordsLocked() {
+  const now = Date.now();
+  while (wrongPasswordTimes.length && now - wrongPasswordTimes[0] > 60000) {
+    wrongPasswordTimes.shift();
+  }
+  return wrongPasswordTimes.length >= MAX_WRONG_PASSWORDS_PER_MINUTE;
+}
+
+// Create the private room (needs both settings; never a room without a password)
+function setupPrivateRoom() {
+  if (!PRIVATE_ROOM_CODE && !PRIVATE_ROOM_PASSWORD) return; // not wanted
+  if (!ROOM_CODE_RE.test(PRIVATE_ROOM_CODE) || !PRIVATE_ROOM_PASSWORD) {
+    console.warn(
+      "Private room NOT created: set PRIVATE_ROOM_CODE (4 letters or numbers) and PRIVATE_ROOM_PASSWORD together.",
+    );
+    return;
+  }
+  const room = createRoom(PRIVATE_ROOM_CODE, null, null);
+  room.permanent = true;
+  room.password = PRIVATE_ROOM_PASSWORD;
+  room.maxSongs = PRIVATE_ROOM_MAX_SONGS;
+  rooms.set(room.code, room);
+  console.log(
+    `Private room ${room.code} is ready (password protected, up to ${room.maxSongs} songs)`,
+  );
+}
+
+// ---- Songs and uploads (per room) ----
+
+// Finds the room a request is about and checks that the caller is really in
+// it. The page sends its room code and its own socket id (only that browser
+// knows it), so nobody can list or upload to a room they have not joined.
+function roomForRequest(req) {
+  const code = String(req.query.room || "");
+  const sid = String(req.query.sid || "");
+  const room = ROOM_CODE_RE.test(code) ? rooms.get(code) : undefined;
+  return room && room.members.has(sid) ? room : null;
+}
+
+// Returns the clean file name if it is a song of this room, otherwise null.
+// basename() blocks tricks like "../server.js".
+function validSongFile(room, value) {
+  const file = path.basename(String(value || ""));
+  return room.songs.has(file) ? file : null;
+}
+
+// Simple limit on how often one person can start an upload
+const uploadLog = new Map(); // socket id -> times of its recent uploads
+
+function allowUpload(socketId) {
+  const now = Date.now();
+  const recent = (uploadLog.get(socketId) || []).filter((t) => now - t < 60000);
+  const allowed = recent.length < MAX_UPLOADS_PER_MINUTE;
+  if (allowed) recent.push(now);
+  uploadLog.set(socketId, recent);
+  return allowed;
+}
+
+// Runs BEFORE the file is read: checks the room, the limits, and reserves
+// the space, so a refused upload never touches the disk.
+function uploadGuard(req, res, next) {
+  const room = roomForRequest(req);
+  if (!room) {
+    return res
+      .status(403)
+      .json({ ok: false, error: "You are not in this room" });
+  }
+  if (room.songs.size + room.pendingUploads >= room.maxSongs) {
+    return res.status(409).json({
+      ok: false,
+      error: `This room has reached its song limit (${room.maxSongs})`,
+    });
+  }
+  const size = Number(req.headers["content-length"]) || 0;
+  if (totalBytes + pendingBytes + size > MAX_TOTAL_BYTES) {
+    return res.status(507).json({ ok: false, error: "Server storage is full" });
+  }
+  if (!allowUpload(String(req.query.sid))) {
+    return res.status(429).json({
+      ok: false,
+      error: "Too many uploads, please wait a minute",
+    });
+  }
+
+  // Hold the slot and the space until this request is over
+  room.pendingUploads++;
+  pendingBytes += size;
+  let released = false;
+  res.on("close", () => {
+    if (released) return;
+    released = true;
+    room.pendingUploads--;
+    pendingBytes -= size;
+  });
+
+  req.room = room;
+  next();
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = roomDir(req.room.code);
+    fs.mkdir(dir, { recursive: true }, (err) => cb(err, dir));
+  },
+  filename: (req, file, cb) => {
+    const base =
+      path
+        .basename(file.originalname, path.extname(file.originalname))
+        .replace(/[^a-zA-Z0-9 _-]/g, "")
+        .trim()
+        .replace(/\s+/g, "-") || "song";
+    // Two uploads in the same millisecond must not get the same name
+    let stamp = Date.now();
+    while (fs.existsSync(path.join(roomDir(req.room.code), `${stamp}-${base}.mp3`))) {
+      stamp++;
+    }
+    cb(null, `${stamp}-${base}.mp3`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_FILE_BYTES, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const okTypes = ["audio/mpeg", "audio/mp3", "application/octet-stream", ""];
+    if (ext !== ".mp3" || !okTypes.includes(file.mimetype)) {
+      return cb(new Error("Only MP3 files are allowed"));
+    }
+    cb(null, true);
+  },
+});
+
+// POST /upload?room=AB12&sid=<socket id>
+app.post("/upload", uploadGuard, (req, res) => {
+  const room = req.room;
+
+  // any() accepts the file under any field name; the filter above still
+  // makes sure only .mp3 files get saved.
+  upload.any()(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      const msg =
+        err.code === "LIMIT_FILE_SIZE"
+          ? "File too large (max 20 MB)"
+          : err.message;
+      return res.status(400).json({ ok: false, error: msg });
+    }
+    if (err) return res.status(400).json({ ok: false, error: err.message });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ ok: false, error: "No file uploaded" });
+    }
+
+    const saved = req.files[0];
+
+    // The room may have been deleted while the file was arriving
+    if (room.destroyed) {
+      fs.rm(saved.path, { force: true }, () => {});
+      return res.status(410).json({ ok: false, error: "This room has closed" });
+    }
+
+    room.songs.set(saved.filename, {
+      file: saved.filename,
+      title: songTitle(saved.filename),
+      added: Date.now(),
+      size: saved.size,
+    });
+    room.bytes += saved.size;
+    totalBytes += saved.size;
+
+    // Tell everyone in the room, so their song list updates by itself
+    io.to(room.code).emit("songsUpdate");
+    res.json({ ok: true, file: saved.filename });
+  });
+});
+
+// GET /songs?room=AB12&sid=<socket id>  ->  [{ file, title }], newest first
+app.get("/songs", (req, res) => {
+  const room = roomForRequest(req);
+  if (!room) {
+    return res
+      .status(403)
+      .json({ ok: false, error: "You are not in this room" });
+  }
+  const songs = [...room.songs.values()]
+    .sort((a, b) => b.added - a.added)
+    .map(({ file, title }) => ({ file, title }));
+  res.set("Cache-Control", "no-store");
+  res.json(songs);
+});
+
+// GET /music/AB12/<file>: the audio itself. Only songs that belong to a room
+// that exists are served (sendFile also handles Range requests for seeking).
+app.get("/music/:code/:file", (req, res) => {
+  const code = String(req.params.code);
+  const room = ROOM_CODE_RE.test(code) ? rooms.get(code) : undefined;
+  const file = path.basename(String(req.params.file));
+  if (!room || !room.songs.has(file)) return res.status(404).end();
+
+  res.sendFile(
+    path.join(roomDir(code), file),
+    { headers: { "Cache-Control": "private, max-age=3600" } },
+    (err) => {
+      if (err && !res.headersSent) res.status(err.status || 404).end();
+    },
+  );
+});
 
 // ---- Error handling (B16) ----
 
@@ -321,6 +588,12 @@ io.on("connection", (socket) => {
     leaveCurrentRoom(socket);
 
     const code = generateRoomCode();
+    // Start clean, in case a folder from an earlier room could not be deleted
+    try {
+      fs.rmSync(roomDir(code), { recursive: true, force: true });
+    } catch (err) {
+      console.error(`Could not clean music/${code}:`, err.message);
+    }
     const room = createRoom(code, socket.id, nickname);
     rooms.set(code, room);
     startTicks(room); // B13
@@ -356,6 +629,26 @@ io.on("connection", (socket) => {
       return socket.emit("roomState", roomSnapshot(room));
     }
 
+    // Password first, so nobody without it can learn who is in the room
+    if (room.password) {
+      const given = typeof data.password === "string" ? data.password : "";
+      if (!given) {
+        return socket.emit("roomError", {
+          message: "This room needs a password",
+        });
+      }
+      if (passwordsLocked()) {
+        return socket.emit("roomError", {
+          message: "Too many wrong passwords, please wait a minute and try again",
+        });
+      }
+      if (!samePassword(given, room.password)) {
+        wrongPasswordTimes.push(Date.now());
+        console.log(`Wrong password for room ${code}`);
+        return socket.emit("roomError", { message: "Wrong password" });
+      }
+    }
+
     if (isNicknameTaken(room, nickname, socket.id)) {
       return socket.emit("roomError", {
         message: `The nickname "${nickname}" is already taken in this room`,
@@ -365,6 +658,7 @@ io.on("connection", (socket) => {
     leaveCurrentRoom(socket);
 
     room.members.set(socket.id, nickname);
+    keepRoom(room); // the room may have been waiting to be deleted
     socket.join(code);
     socket.roomCode = code;
 
@@ -427,7 +721,7 @@ io.on("connection", (socket) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
-    const song = validSongFile(data.song);
+    const song = validSongFile(room, data.song);
     if (!song) {
       return socket.emit("roomError", { message: "Song not found" });
     }
@@ -456,7 +750,7 @@ io.on("connection", (socket) => {
     const room = getRoomOf(socket);
     if (!room) return;
 
-    const file = validSongFile(data.song);
+    const file = validSongFile(room, data.song);
     if (!file) {
       return socket.emit("roomError", { message: "Song not found" });
     }
@@ -576,6 +870,7 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     leaveCurrentRoom(socket);
+    uploadLog.delete(socket.id);
     console.log(
       `Disconnected: ${socket.id} (online: ${io.engine.clientsCount})`,
     );
@@ -605,6 +900,16 @@ server.on("error", (err) => {
   }
   process.exit(1);
 });
+
+setupPrivateRoom();
+
+// Ctrl+C or a stop signal: delete the room songs before the server quits
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    wipeRoomFolders();
+    process.exit(0);
+  });
+}
 
 server.listen(PORT, () => {
   console.log(`Wesync running at http://localhost:${PORT}`);

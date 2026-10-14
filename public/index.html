@@ -57,6 +57,20 @@
           </div>
           <p id="codeError" class="error-text" role="alert" hidden></p>
         </div>
+
+        <!-- Only shown when the room asks for a password (app.js) -->
+        <div id="passwordRow" hidden>
+          <label class="label" for="roomPassword">Room password</label>
+          <input
+            id="roomPassword"
+            class="input"
+            type="password"
+            placeholder="Password"
+            autocomplete="off"
+            aria-describedby="roomPasswordError"
+          />
+          <p id="roomPasswordError" class="error-text" role="alert" hidden></p>
+        </div>
       </section>
 
       <!-- Shown after you are in a room (roominfo.js adds the member count,
