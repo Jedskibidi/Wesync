@@ -172,10 +172,7 @@ function destroyRoom(room) {
     { recursive: true, force: true, maxRetries: 5, retryDelay: 200 },
     (err) => {
       if (err) {
-        console.error(
-          `Could not delete the songs of room ${room.code}:`,
-          err.message,
-        );
+        console.error(`Could not delete the songs of room ${room.code}:`, err.message);
       }
     },
   );
@@ -185,8 +182,7 @@ function destroyRoom(room) {
 // Delete a room's songs but keep the room itself (used by the private room)
 function clearRoomSongs(room) {
   // Someone came back, or an upload is still arriving: do nothing
-  if (room.destroyed || room.members.size > 0 || room.pendingUploads > 0)
-    return;
+  if (room.destroyed || room.members.size > 0 || room.pendingUploads > 0) return;
 
   room.deleteTimer = null;
   totalBytes = Math.max(0, totalBytes - room.bytes);
@@ -205,16 +201,11 @@ function clearRoomSongs(room) {
     { recursive: true, force: true, maxRetries: 5, retryDelay: 200 },
     (err) => {
       if (err) {
-        console.error(
-          `Could not delete the songs of room ${room.code}:`,
-          err.message,
-        );
+        console.error(`Could not delete the songs of room ${room.code}:`, err.message);
       }
     },
   );
-  console.log(
-    `Room ${room.code} stays open, but ${count} song(s) were removed`,
-  );
+  console.log(`Room ${room.code} stays open, but ${count} song(s) were removed`);
 }
 
 // Someone is back in a room that was about to be deleted
@@ -503,9 +494,7 @@ const storage = multer.diskStorage({
         .replace(/\s+/g, "-") || "song";
     // Two uploads in the same millisecond must not get the same name
     let stamp = Date.now();
-    while (
-      fs.existsSync(path.join(roomDir(req.room.code), `${stamp}-${base}.mp3`))
-    ) {
+    while (fs.existsSync(path.join(roomDir(req.room.code), `${stamp}-${base}.mp3`))) {
       stamp++;
     }
     cb(null, `${stamp}-${base}.mp3`);
@@ -562,7 +551,10 @@ app.post("/upload", uploadGuard, (req, res) => {
     totalBytes += saved.size;
 
     // Tell everyone in the room, so their song list updates by itself
-    io.to(room.code).emit("songsUpdate");
+    io.to(room.code).emit("songsUpdate", {
+      by: room.members.get(String(req.query.sid)) || null,
+      title: songTitle(saved.filename),
+    });
     res.json({ ok: true, file: saved.filename });
   });
 });
@@ -615,6 +607,17 @@ function handle(socket, event, handler) {
         message: "Something went wrong on the server. Please try again.",
       });
     }
+  });
+}
+
+// Tell everyone ELSE in the room what this person just did, so their screen can
+// show a small message ("Jed skipped to ..."). The person who did it already
+// sees the result, so they are skipped (same idea as play and pause).
+function announce(socket, room, type, extra = {}) {
+  socket.to(room.code).emit("activity", {
+    type,
+    by: room.members.get(socket.id) || null,
+    ...extra,
   });
 }
 
@@ -683,8 +686,7 @@ io.on("connection", (socket) => {
       }
       if (passwordsLocked()) {
         return socket.emit("roomError", {
-          message:
-            "Too many wrong passwords, please wait a minute and try again",
+          message: "Too many wrong passwords, please wait a minute and try again",
         });
       }
       if (!samePassword(given, room.password)) {
@@ -757,7 +759,10 @@ io.on("connection", (socket) => {
     const position = cleanPosition(data.position);
     if (position === undefined) return;
     updateRoom(room, { position });
-    socket.to(room.code).emit("seek", { position: room.position });
+    socket.to(room.code).emit("seek", {
+      position: room.position,
+      by: room.members.get(socket.id) || null, // for the "Jed jumped to" toast
+    });
   });
 
   // changeSong {song}  (B11) - the new song starts paused at 0:00
@@ -812,6 +817,7 @@ io.on("connection", (socket) => {
       by: room.members.get(socket.id) || null,
     });
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
+    announce(socket, room, "queueAdd", { title: songTitle(file) });
   });
 
   // removeFromQueue {id}
@@ -826,8 +832,9 @@ io.on("connection", (socket) => {
       });
     }
 
-    room.queue.splice(index, 1);
+    const [removed] = room.queue.splice(index, 1);
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
+    announce(socket, room, "queueRemove", { title: removed.title });
   });
 
   // reorderQueue {id, toIndex}
@@ -849,6 +856,7 @@ io.on("connection", (socket) => {
     if (to !== from) {
       const [moved] = room.queue.splice(from, 1);
       room.queue.splice(to, 0, moved);
+      announce(socket, room, "queueMove", { title: moved.title });
     }
     // Always answer, so a tab that showed the move early is put right
     io.to(room.code).emit("queueUpdate", { queue: room.queue });
@@ -864,6 +872,7 @@ io.on("connection", (socket) => {
       return socket.emit("roomError", { message: "The queue is empty" });
     }
     broadcastState(room);
+    announce(socket, room, "next", { title: songTitle(room.currentSong) });
   });
 
   // previous: go back to the last song that played.
@@ -887,6 +896,7 @@ io.on("connection", (socket) => {
     }
     startSong(room, previous.file, previous.by);
     broadcastState(room);
+    announce(socket, room, "previous", { title: songTitle(previous.file) });
   });
 
   // songEnded {song}: a client says its audio reached the end.

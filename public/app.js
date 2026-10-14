@@ -779,6 +779,40 @@ function announceMembers(members) {
   knownMembers = [...members];
 }
 
+// ---------- Messages for what other people do ----------
+
+// Long titles are cut so a toast stays small
+function shortTitle(title) {
+  const text = String(title || "");
+  return text.length > 30 ? text.slice(0, 29) + "…" : text;
+}
+
+// Skipping, queue changes: the server sends { type, by, title }
+socket.on("activity", ({ type, by, title }) => {
+  if (!by) return;
+  const song = shortTitle(title);
+  const messages = {
+    next: `${by} skipped to "${song}"`,
+    previous: `${by} went back to "${song}"`,
+    queueAdd: `${by} added "${song}" to the queue`,
+    queueRemove: `${by} removed "${song}" from the queue`,
+    queueMove: `${by} moved "${song}" in the queue`,
+  };
+  if (messages[type]) showToast(messages[type]);
+});
+
+// Jumping around in a song can fire many times in a row (for example when
+// someone holds an arrow key), so we wait a moment and show only the last one
+let seekToastTimer = null;
+
+function toastSeek(by, position) {
+  if (!by) return;
+  clearTimeout(seekToastTimer);
+  seekToastTimer = setTimeout(() => {
+    showToast(`${by} jumped to ${formatTime(position)}`);
+  }, 600);
+}
+
 // The connection indicator: "connected", "reconnecting" or "offline"
 let everConnected = false;
 
@@ -862,9 +896,13 @@ socket.on("queueUpdate", ({ queue }) => {
 });
 
 // Somebody in the room uploaded a song: refresh the playlist and library card
-socket.on("songsUpdate", () => {
+socket.on("songsUpdate", (info) => {
   loadSongs();
   document.dispatchEvent(new Event("songsChanged"));
+  // Tell us about songs other people added (we already see our own upload)
+  if (info && info.by && info.by !== submittedNickname) {
+    showToast(`${info.by} added "${shortTitle(info.title)}" to the playlist`);
+  }
 });
 
 // We left the room: its songs are gone for us too
@@ -913,11 +951,12 @@ socket.on("pause", ({ position, by }) => {
   if (by) showToast(`${by} paused`);
 });
 
-socket.on("seek", ({ position }) => {
+socket.on("seek", ({ position, by }) => {
   applyRemote(() => {
     remember(position, playback.isPlaying);
     syncAudioToRoom();
   });
+  toastSeek(by, position);
 });
 
 // "by" is the nickname of the person who picked the song (if the server sends it)
@@ -927,6 +966,7 @@ socket.on("changeSong", ({ song, by }) => {
     remember(0, false);
     syncAudioToRoom(); // the file is still loading, so this waits for metadata
   });
+  if (by) showToast(`${by} picked "${shortTitle(titleFromFile(song))}"`);
 });
 
 // Drift correction (F13): the server tells us every few seconds where the
