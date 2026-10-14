@@ -838,6 +838,7 @@ socket.on("roomState", (state) => {
   stopRoomLoading();
   showMessage("");
   clearFieldErrors();
+  clearNoRoomUploadMessage();
   rejoining = false;
   pendingAction = null;
   lastRoom = {
@@ -1326,7 +1327,7 @@ function renderPlaylist() {
     } else if (songsFailed) {
       empty.textContent = "We couldn't load your songs. Check your connection and refresh the page.";
     } else if (!roomCodeNow()) {
-      empty.textContent = "Create or join a room to add songs. Songs belong to the room.";
+      empty.textContent = "No songs yet.";
     } else {
       empty.textContent = "No songs yet. Add your mp3 files.";
     }
@@ -1474,6 +1475,14 @@ function setUploadStatus(text, kind) {
   uploadStatus.className = "upload-status" + (kind ? " " + kind : "");
 }
 
+// Shown when someone tries to upload without being in a room
+const NO_ROOM_UPLOAD_MESSAGE = "Create or join a room first. Songs belong to the room.";
+
+// Once you are in a room that message is out of date, so remove it
+function clearNoRoomUploadMessage() {
+  if (uploadStatus.textContent === NO_ROOM_UPLOAD_MESSAGE) setUploadStatus("");
+}
+
 // Returns an error message, or "" if the file is fine.
 // This only checks on the client; the server must check again.
 function checkFile(file) {
@@ -1512,7 +1521,7 @@ async function uploadFiles(fileList) {
   if (uploading) return;
 
   if (!inRoom || !roomCodeNow()) {
-    setUploadStatus("Create or join a room first. Songs belong to the room.", "error");
+    setUploadStatus(NO_ROOM_UPLOAD_MESSAGE, "error");
     return;
   }
 
@@ -1607,6 +1616,25 @@ dropZone.addEventListener("drop", (e) => uploadFiles(e.dataTransfer.files));
 ["dragover", "drop"].forEach((name) => {
   window.addEventListener(name, (e) => e.preventDefault());
 });
+
+// ---------- Only show the player while you are in a room ----------
+// The player, playlist and queue are hidden on the first screen (Create Room /
+// Join Room). They appear as soon as the room card appears, and go away again
+// when you leave. We watch the room card's "hidden" attribute, so this works
+// no matter which file shows or hides it.
+const roomLayout = document.querySelector(".layout");
+
+function syncLayoutWithRoom() {
+  const inARoom = !$("roomInfo").hidden;
+  roomLayout.style.display = inARoom ? "" : "none";
+  if (!inARoom) audio.pause(); // no hidden music playing after leaving
+}
+
+new MutationObserver(syncLayoutWithRoom).observe($("roomInfo"), {
+  attributes: true,
+  attributeFilter: ["hidden"],
+});
+syncLayoutWithRoom();
 
 // ---------- Start ----------
 
