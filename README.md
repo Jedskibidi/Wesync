@@ -83,8 +83,8 @@ All settings are optional. They can be set as environment variables on the host 
 Example `.env` file:
 
 ```
-PRIVATE_ROOM_CODE=LOVE
-PRIVATE_ROOM_PASSWORD=choose-something-only-you-know
+PRIVATE_ROOM_CODE= 4 room letters of your choice
+PRIVATE_ROOM_PASSWORD= choose something only you know
 PRIVATE_ROOM_MAX_SONGS=50
 ```
 
