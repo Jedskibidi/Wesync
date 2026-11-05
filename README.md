@@ -99,20 +99,9 @@ Settings are read by the server. They can be set as environment variables on the
 | `CLIENT_ORIGINS`         | none    | Comma-separated frontend addresses allowed to connect, without a trailing slash, for example `https://wesync-one.vercel.app`. |
 | `SERVE_CLIENT`           | none    | When `true`, the server also serves the `client/` folder. For local development only.                                         |
 
-Example `.env` file:
-
-```
-SERVE_CLIENT=true
-PRIVATE_ROOM_CODE=LOVE
-PRIVATE_ROOM_PASSWORD=change-this-password
-PRIVATE_ROOM_MAX_SONGS=50
-```
-
 ### Private room
 
 The private room is enabled when **both** `PRIVATE_ROOM_CODE` and `PRIVATE_ROOM_PASSWORD` are set. It is created every time the server starts and is protected by the password. It is never deleted when it empties, but its songs are removed after it has been empty for a while.
-
-The `.env` file must never be committed. It is already listed in `.gitignore`.
 
 ## Project Structure
 
