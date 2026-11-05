@@ -80,13 +80,6 @@ All settings are optional. They can be set as environment variables on the host 
 | `PRIVATE_ROOM_PASSWORD`  | none    | Password of the private room.                             |
 | `PRIVATE_ROOM_MAX_SONGS` | `50`    | Most songs the private room can hold.                     |
 
-Example `.env` file:
-
-```
-PRIVATE_ROOM_CODE= 4 room letters of your choice
-PRIVATE_ROOM_PASSWORD= choose something only you know
-PRIVATE_ROOM_MAX_SONGS=50
-```
 
 ### Private room
 
