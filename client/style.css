@@ -191,9 +191,6 @@ a:hover {
     var(--focus-ring);
 }
 
-.btn-primary {
-}
-
 .btn-secondary {
   background: var(--surface);
   box-shadow:
