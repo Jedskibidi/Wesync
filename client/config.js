@@ -1,7 +1,12 @@
-// Where the Wesync server lives.
-// Local development (localhost or a local network address): same origin, because
-// the server also serves this client when SERVE_CLIENT=true.
-// Production: the address of the Render service. Replace the placeholder below.
+/**
+ * @file config.js
+ * @description Sets window.WESYNC_API_URL, the address of the Wesync server.
+ * On localhost or a local network address it stays empty (same origin, since
+ * the server also serves the client when SERVE_CLIENT=true). Otherwise it
+ * points to the production server on Render.
+ * @location client\config.js
+ */
+
 (function () {
   var host = location.hostname;
   var isLocal =
