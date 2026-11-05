@@ -1,75 +1,150 @@
-# WeSync: Honeybee Pixel Theme
+# Wesync
 
-A cottagecore pixel-art theme for WeSync, a live listening room. Cream and honey colors, thick brown outlines, and a pixel gramophone with a spinning disc.
+Wesync is a web app for listening to music together in real time. A user creates a room and shares a 4-character code or an invite link. Everyone who joins hears the same song at the same moment.
 
-All colors are CSS variables in `style.css` (`:root`). Use the variable names shown in the Usage column instead of raw hex codes.
+Built by **Jed Manaloto** and **Christine Fauni** with Node.js, Express, and Socket.IO. The interface uses a honeybee pixel art theme.
 
-## Main Color Palette
+**Live demo:** <https://wesync-shmf.onrender.com>
 
-| Name | Hex Code | Usage Suggestion |
-|---|---|---|
-| Cream Meadow | `#F6E4B4` | Background/Base color (`--bg`) |
-| Honey Gold | `#F7B731` | Primary buttons, play button, progress bar (`--honey`) |
-| Hive Brown | `#5A2D0C` | Text, outlines, hard shadows (`--ink`, `--text`) |
-| Comb Cream | `#FFF4D2` | Cards, secondary buttons, player (`--surface`) |
-| Clay Tan | `#DDA66A` | Top and bottom bands, dotted dividers (`--band`) |
-| Blossom Pink | `#F29A8E` | Small accents, bee cheek, floating notes (`--pink`) |
-| Brass Gold | `#D6AA4E` | Gramophone body, disc center hole |
-| Berry Red | `#B3261E` | Error text, invalid inputs (`--danger`) |
+## Features
 
-## Sub Colors
+- **Rooms.** A room is created with a 4-character code. An invite link fills in the code automatically for anyone who opens it.
+- **Synced playback.** Play, pause, seek, and song changes apply to every listener in the room. The server sends a sync tick every few seconds, which corrects small drifts.
+- **Shared playlist.** Any member can upload MP3 files by selecting them or dragging them onto the page. Songs can be searched by title.
+- **Shared queue.** Songs can be added to an "Up next" list, removed, and reordered by dragging or with the up and down buttons.
+- **Next and previous.** Navigation moves through the queue or returns to the last song. The next song starts automatically when one ends.
+- **Live activity messages.** Short messages report what other members do, such as pausing, skipping, or adding a song.
+- **Member list.** All members in the room are listed. The first member to join is marked as the host.
+- **Private room.** A room with a fixed code and a password can be enabled optionally.
+- **Reconnect support.** If the connection drops, the page rejoins the room automatically.
+- **Audio visualizer.** Animated pixel bars react to the music.
+- **Temporary storage.** Songs belong to a single room and are deleted when the room closes.
 
-| Base Color | Sub Color Name | Hex Code | Usage Suggestion |
-|---|---|---|---|
-| Cream Meadow | Butter Cream | `#FBE3A0` | Hovered rows and cards, bevel shading (`--surface-2`) |
-| | Soft Parchment | `#FFFBE8` | Input background, bevel highlight |
-| | Sprout Cream | `#ECD193` | Sprout pattern on the page background |
-| Honey Gold | Sunbeam | `#FFD966` | Button highlight, now-playing track row (`--honey-light`) |
-| | Honey Glow | `#FFC94D` | Button hover |
-| | Amber Honey | `#D9861A` | Button shadow edge, pressed state, progress stripes (`--honey-dark`) |
-| | Bee Yellow | `#FFC83D` | Bee sprite body |
-| | Stripe Orange | `#C46A14` | Bee sprite stripes |
-| Hive Brown | Bark Brown | `#8A5A2B` | Muted text: artist names, timestamps, labels (`--text-muted`) |
-| | Vinyl Brown | `#3D2410` | Default disc when a song has no cover |
-| | Groove Brown | `#5C3A1C` | Record grooves on the default disc |
-| Comb Cream | Wax White | `#FFFFFF` | Focused input background |
-| | Warm Hover | `#FFF0C4` | Card hover background |
-| Clay Tan | Kraft Sand | `#F0CF7C` | Secondary button hover shading |
-| Blossom Pink | Blush Red | `#F5B5AE` | Error glow around invalid inputs |
-| Brass Gold | Polished Brass | `#EECD6E` | Gramophone top plate |
-| | Horn Gold | `#F4D678` | Gramophone horn |
-| | Shaded Brass | `#B08234` | Gramophone side shading |
+## Tech Stack
 
-## Fonts
+| Area      | Tools                                          |
+| --------- | ---------------------------------------------- |
+| Server    | Node.js, Express 5                             |
+| Real time | Socket.IO 4                                    |
+| Uploads   | Multer                                         |
+| Frontend  | HTML, CSS, vanilla JavaScript                  |
+| Audio     | HTML audio element, Web Audio API (visualizer) |
+| Fonts     | Pixelify Sans and VT323 (Google Fonts)         |
 
-| Role | Font | Weights | Usage Suggestion |
-|---|---|---|---|
-| Headings | Pixelify Sans | 500, 600, 700 | Headings, buttons, song titles, LCD screen (`--font-heading`) |
-| Body | VT323 | 400 | Paragraphs, inputs, artist names, timestamps (`--font-body`) |
+## Getting Started
 
-Both fonts are from Google Fonts and free under the SIL Open Font License. VT323 is small, so the base text size is `1.3rem`.
+### Requirements
 
-## Pixel Sprites and Patterns
+[Node.js](https://nodejs.org) 18 or newer. Version 20.12 or newer is recommended, because it loads the optional `.env` file natively.
 
-| Name | Class or Variable | Usage Suggestion |
-|---|---|---|
-| Bee | `.spr .spr-bee` | Logo, now-playing marker in the track list |
-| Honey Cell | `.spr .spr-cell` | Album art placeholder |
-| Flower | `.spr .spr-flower` | Decoration |
-| Gramophone | `.stage` with `--spr-gramo` and `--spr-arm` | The player |
-| Music Notes | `.note`, `.note.n2` | Float out of the horn while a song plays |
-| Sprout Pattern | `--pat-sprout` | Page background |
-| Striped Band | `--pat-band` | Top and bottom edge of the page |
+### Installation
 
-Scale sprites by whole numbers (2x, 3x, 4x) so the pixels stay even.
+```bash
+npm install
+npm start
+```
 
-## Files
+The app is then available at <http://localhost:3000>.
 
-| File | Purpose |
-|---|---|
-| `index.html` | Page layout (room form and player) |
-| `style.css` | Theme, components, gramophone, layout |
-| `app.js` | Room, socket, and audio sync logic |
-| `gramophone.js` | Spinning disc, floating notes, cover picker, slider fills |
+### Development
 
-Keep `[hidden] { display: none !important; }` at the top of `style.css`. The player stays hidden until the user is in a room.
+`npm run dev` restarts the server whenever a file changes. On Windows, `start.bat` opens the browser and starts the dev server.
+
+### Testing with multiple listeners
+
+- **Same network:** open `http://<local-ip-of-the-host-computer>:3000` on the other device.
+- **Single machine:** open the page in two browser tabs.
+
+## Usage
+
+1. Enter a nickname and select **Create Room**. A 4-character room code is generated.
+2. Select **Copy invite link** and send it to another person. They enter a nickname and select **Join Room**.
+3. Add songs with **Add songs** or by dropping MP3 files on the page.
+4. Click a song to play it for everyone, or add it to the queue to play it next.
+5. When music is already playing, a new listener sees a **Tap to join the listening** button. Browsers block sound until the user interacts with the page, so this single tap starts the audio in sync.
+
+Volume is local. Each listener controls their own.
+
+## Configuration
+
+All settings are optional. They can be set as environment variables on the host or in a local `.env` file. The server must be restarted after a change.
+
+| Variable                 | Default | Description                                               |
+| ------------------------ | ------- | --------------------------------------------------------- |
+| `PORT`                   | `3000`  | Port the server listens on.                               |
+| `MAX_SONGS_PER_ROOM`     | `20`    | Most songs one room can upload.                           |
+| `MAX_TOTAL_MB`           | `2048`  | Most disk space all rooms together can use, in megabytes. |
+| `MAX_UPLOADS_PER_MINUTE` | `20`    | Most uploads one user can start per minute.               |
+| `ROOM_GRACE_SECONDS`     | `180`   | How long an empty room is kept before it is deleted.      |
+| `PRIVATE_ROOM_CODE`      | none    | Code of the private room (4 letters or numbers).          |
+| `PRIVATE_ROOM_PASSWORD`  | none    | Password of the private room.                             |
+| `PRIVATE_ROOM_MAX_SONGS` | `50`    | Most songs the private room can hold.                     |
+
+Example `.env` file:
+
+```
+PRIVATE_ROOM_CODE=LOVE
+PRIVATE_ROOM_PASSWORD=choose-something-only-you-know
+PRIVATE_ROOM_MAX_SONGS=50
+```
+
+### Private room
+
+The private room is enabled when **both** `PRIVATE_ROOM_CODE` and `PRIVATE_ROOM_PASSWORD` are set. It is created every time the server starts and is protected by the password. It is never deleted when it empties, but its songs are removed after it has been empty for a while.
+
+The `.env` file must never be committed. It is already listed in `.gitignore`.
+
+## Project Structure
+
+```
+Wesync/
+├── server.js          Express and Socket.IO server: rooms, sync, queue, uploads
+├── public/
+│   ├── index.html     Page layout
+│   ├── style.css      Honeybee pixel theme
+│   ├── app.js         Main client logic: rooms, audio sync, playlist, queue
+│   ├── roominfo.js    Member count, copy invite link, leave room
+│   ├── visualizer.js  Animated audio bars
+│   └── library.js     Older song list (no longer loaded)
+├── music/             Temporary uploaded songs, one folder per room
+├── start.bat          Windows shortcut to start the dev server
+└── package.json
+```
+
+## Deployment
+
+Wesync runs on any host that can run a Node.js server and keep WebSocket connections open, such as Render.
+
+- **Build command:** `npm install`
+- **Start command:** `npm start`
+- **Environment variables:** any variable from the configuration table can be set in the host's settings.
+
+Notes:
+
+- Rooms are stored in the server's memory, so only **one instance** can run. Multiple instances do not share room data.
+- Uploaded songs are temporary. They are deleted when a room closes and when the server restarts.
+- On a free hosting plan, the service may sleep after a period of inactivity, which makes the first request afterward slow to load.
+
+## Limits
+
+| Limit                 | Value          |
+| --------------------- | -------------- |
+| File type             | MP3 only       |
+| File size             | 20 MB per song |
+| Queue length          | 50 songs       |
+| Previous song history | 20 songs       |
+| Nickname length       | 20 characters  |
+
+## Documentation
+
+- [DOCUMENTATION.md](./DOCUMENTATION.md): how the server and client work, with a reference for every socket event and endpoint.
+- [THEME.md](./THEME.md): colors, fonts, and pixel sprites of the honeybee theme.
+
+## A Note on Music
+
+Only music that the uploader has the right to share should be uploaded. This repository does not include any songs.
+
+## Authors
+
+- **Jed Manaloto**: [GitHub](https://github.com/Jedskibidi)
+- **Christine Fauni**: [GitHub](https://github.com/christinefauni)
