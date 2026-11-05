@@ -1,7 +1,13 @@
 /**
  * @file server.js
- * @description Backend for Wesync: Express + Socket.IO rooms, playback sync, queue, and MP3 uploads.
- * Location: server\server.js
+ * @description Backend for Wesync, a shared music-listening app. Runs an
+ * Express HTTP server and a Socket.IO server together. Manages rooms
+ * (4-character codes, optional password-protected private room), keeps
+ * playback in sync (play, pause, seek, song changes, sync ticks), handles the
+ * song queue with next/previous history, accepts and serves MP3 uploads per
+ * room with size, count and rate limits, and deletes a room's songs when the
+ * room empties or the server stops.
+ * @location server\server.js
  */
 
 const express = require("express");
