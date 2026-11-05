@@ -334,7 +334,7 @@ The seek bar moves 5 seconds with the arrow keys. The drop zone opens the file p
 
 ### Environment variables
 
-See the table in the README. `CLIENT_ORIGINS` is a comma-separated list of exact frontend addresses (scheme and domain, no trailing slash), for example `https://wesync.vercel.app`. `SERVE_CLIENT=true` is for local development only. Values must be positive numbers where a number is expected. Any invalid value falls back to the default.
+See the table in the README. `CLIENT_ORIGINS` is a comma-separated list of exact frontend addresses (scheme and domain, no trailing slash), for example `https://wesync-one.vercel.app`. `SERVE_CLIENT=true` is for local development only. Values must be positive numbers where a number is expected. Any invalid value falls back to the default.
 
 `server/.env` is loaded with `process.loadEnvFile`, which requires Node 20.12 or newer. On older versions the file is skipped without an error, so the variables must be set on the host instead. Settings already defined by the host are **not** overridden by the `.env` file.
 
@@ -355,33 +355,33 @@ See the table in the README. `CLIENT_ORIGINS` is a comma-separated list of exact
 
 ### Change a limit
 
-Set the matching environment variable (for example `MAX_SONGS_PER_ROOM=10`) and restart the server. For the fixed limits, edit the constant in `server/server.js`. The 20 MB file limit is also checked in `client/app.js`, so both files must be changed.
+A limit is changed by setting the matching environment variable (for example `MAX_SONGS_PER_ROOM=10`) and restarting the server. The fixed limits are changed by editing the constant in `server/server.js`. The 20 MB file limit is also checked in `client/app.js`, so both files must be changed.
 
 ### Change how often clients are resynced
 
-Edit `TICK_INTERVAL_MS` in `server/server.js` and `DRIFT_LIMIT_SECONDS` in `client/app.js`. A smaller drift limit corrects more often but may cause small audio jumps.
+The tick interval is set by `TICK_INTERVAL_MS` in `server/server.js`, and the drift tolerance by `DRIFT_LIMIT_SECONDS` in `client/app.js`. A smaller drift limit corrects more often but may cause small audio jumps.
 
 ### Add a new room action
 
-1. Add a `handle(socket, "myEvent", ...)` block in `server/server.js`. Call `getRoomOf(socket)` first, update the room, then emit to the other members or use `broadcastState(room)`.
-2. In `client/app.js`, send the event with `sendToRoom("myEvent", data)` and add a `socket.on("myEvent", ...)` handler.
-3. To show a message to other members, call `announce(socket, room, "type", { title })` and handle the new type in the `activity` handler.
+1. A `handle(socket, "myEvent", ...)` block is added in `server/server.js`. It calls `getRoomOf(socket)` first, updates the room, then emits to the other members or uses `broadcastState(room)`.
+2. In `client/app.js`, the event is sent with `sendToRoom("myEvent", data)` and received by a `socket.on("myEvent", ...)` handler.
+3. To show a message to other members, `announce(socket, room, "type", { title })` is called and the new type is handled in the `activity` handler.
 
 ### Change the colors or fonts
 
-Edit the variables at the top of `client/style.css`. See [THEME.md](./THEME.md).
+Colors and fonts are defined as variables at the top of `client/style.css`. See [THEME.md](./THEME.md).
 
 ### Change the server address
 
-Edit the production address in `client/config.js` and redeploy the client.
+The production address is set in `client/config.js`. The client must be redeployed after a change.
 
 ### Allow another frontend address
 
-Add it to `CLIENT_ORIGINS` on the server (comma-separated) and restart the server.
+The address is added to `CLIENT_ORIGINS` on the server (comma-separated), followed by a server restart.
 
 ### Use a different port
 
-Set `PORT`. Most hosts set it automatically.
+The port is set with `PORT`. Most hosts set it automatically.
 
 ---
 
@@ -400,20 +400,20 @@ Set `PORT`. Most hosts set it automatically.
 
 ## 14. Troubleshooting
 
-| Problem                                                         | Likely cause and fix                                                                                                                                  |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Port 3000 is already in use`                                   | Another instance is running. Stop it with Ctrl+C in its terminal, or set a different `PORT`.                                                          |
-| Private room is not created                                     | Both `PRIVATE_ROOM_CODE` (4 letters or numbers) and `PRIVATE_ROOM_PASSWORD` must be set. Check the warning in the server log.                         |
-| `.env` is ignored                                               | The Node version is older than 20.12, or the file is not at `server/.env`. Update Node or set the variables on the host.                              |
-| "Room XXXX not found"                                           | The room was deleted after sitting empty past the grace period, or the code contains a typo.                                                          |
-| "You are not in this room" when uploading                       | The page lost its connection, so the socket id changed. Wait for it to reconnect and try again.                                                       |
-| Upload refused with "room has reached its song limit"           | Raise `MAX_SONGS_PER_ROOM`, or start a new room.                                                                                                      |
-| Upload refused with "Server storage is full"                    | Raise `MAX_TOTAL_MB`, or wait for old rooms to close.                                                                                                 |
-| A listener hears nothing                                        | The browser blocked audio. The listener must press **Tap to join the listening**, or click anywhere on the page.                                      |
-| Songs vanished after a deploy or restart                        | Expected behavior. The server wipes all room folders on start.                                                                                        |
-| Sync keeps jumping                                              | The network is unstable. Raise `DRIFT_LIMIT_SECONDS` slightly so tiny differences are ignored.                                                        |
-| Different members see different queues                          | Refresh one tab. The server sends the full queue on every change and when a member joins.                                                             |
-| CORS error in the browser console, or the socket never connects | `CLIENT_ORIGINS` on the server does not contain the exact frontend address (scheme and domain, no trailing slash). Correct it and restart the server. |
-| The page loads but cannot reach the server                      | `client/config.js` still contains the placeholder, or the address is wrong.                                                                           |
-| Audio plays but the visualizer is silent or the audio is muted  | The `<audio>` tag must have `crossorigin="anonymous"`, and the frontend address must be in `CLIENT_ORIGINS`.                                          |
-| The server address shows "Wesync server is running."            | Expected. The server provides only the API unless `SERVE_CLIENT=true`.                                                                                |
+| Problem                                                         | Likely cause and fix                                                                                                                                                    |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Port 3000 is already in use`                                   | Another instance is already running. It can be stopped with Ctrl+C in its terminal, or a different `PORT` can be set.                                                   |
+| Private room is not created                                     | Both `PRIVATE_ROOM_CODE` (4 letters or numbers) and `PRIVATE_ROOM_PASSWORD` must be set. The server log shows a warning when the private room is skipped.               |
+| `.env` is ignored                                               | The Node version is older than 20.12, or the file is not at `server/.env`. Updating Node, or setting the variables on the host, resolves it.                            |
+| "Room XXXX not found"                                           | The room was deleted after sitting empty past the grace period, or the code contains a typo.                                                                            |
+| "You are not in this room" when uploading                       | The page lost its connection, so the socket id changed. The upload works again after the page reconnects.                                                               |
+| Upload refused with "room has reached its song limit"           | `MAX_SONGS_PER_ROOM` can be raised, or a new room can be started.                                                                                                       |
+| Upload refused with "Server storage is full"                    | `MAX_TOTAL_MB` can be raised, or space frees up when old rooms close.                                                                                                   |
+| A listener hears nothing                                        | The browser blocked audio. Pressing **Tap to join the listening**, or clicking anywhere on the page, starts the audio.                                                  |
+| Songs vanished after a deploy or restart                        | Intended behavior. The server wipes all room folders on start.                                                                                                          |
+| Sync keeps jumping                                              | The network is unstable. Raising `DRIFT_LIMIT_SECONDS` slightly makes the client ignore tiny differences.                                                               |
+| Different members see different queues                          | Refreshing one tab resolves it. The server sends the full queue on every change and when a member joins.                                                                |
+| CORS error in the browser console, or the socket never connects | `CLIENT_ORIGINS` on the server does not contain the exact frontend address (scheme and domain, no trailing slash). Correcting it and restarting the server resolves it. |
+| The page loads but cannot reach the server                      | `client/config.js` still contains the placeholder, or the address is wrong.                                                                                             |
+| Audio plays but the visualizer is silent or the audio is muted  | The `<audio>` tag must have `crossorigin="anonymous"`, and the frontend address must be in `CLIENT_ORIGINS`.                                                            |
+| The server address shows "Wesync server is running."            | Intended behavior. The server provides only the API unless `SERVE_CLIENT=true`.                                                                                         |
