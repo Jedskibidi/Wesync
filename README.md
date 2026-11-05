@@ -6,8 +6,6 @@ Built by **Jed Manaloto** and **Christine Fauni** with Node.js, Express, and Soc
 
 The project has two parts: a Node.js server in `server/` and a static client in `client/`. They are hosted separately (server on Render, client on Vercel).
 
-**Live demo:** <https://wesync-one.vercel.app>
-
 ## Features
 
 - **Rooms.** A room is created with a 4-character code. An invite link fills in the code automatically for anyone who opens it.
