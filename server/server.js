@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const multer = require("multer");
+const cors = require("cors");
 const { Server } = require("socket.io");
 
 // Optional local settings file. .env is in .gitignore, so passwords stay out
@@ -19,7 +20,15 @@ if (typeof process.loadEnvFile === "function") {
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+// Origins allowed to talk to this server, comma separated. Set it on the host
+// to the address of the frontend, e.g. https://wesync.vercel.app
+// Empty means same origin only (the server serves the client itself).
+const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
+const io = new Server(server, { cors: { origin: CLIENT_ORIGINS } });
 
 const PORT = process.env.PORT || 3000;
 const MUSIC_DIR = path.join(__dirname, "music");
@@ -107,7 +116,16 @@ const MAX_HISTORY_LENGTH = 20;
 const SONG_END_GUARD_MS = 2000;
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+app.use(cors({ origin: CLIENT_ORIGINS }));
+
+// Local development only: SERVE_CLIENT=true makes this server also serve the
+// ../client folder, so one command runs everything. In production the client
+// is hosted separately (Vercel) and this stays off.
+if (process.env.SERVE_CLIENT === "true") {
+  app.use(express.static(path.join(__dirname, "..", "client")));
+} else {
+  app.get("/", (req, res) => res.type("text").send("Wesync server is running."));
+}
 
 // "1700000000000-Magnolia-Remix.mp3" -> "Magnolia Remix"
 function songTitle(file) {
@@ -967,5 +985,5 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 server.listen(PORT, () => {
-  console.log(`Wesync running at http://localhost:${PORT}`);
+  console.log(`Wesync server running at http://localhost:${PORT}`);
 });

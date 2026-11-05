@@ -1,4 +1,5 @@
-const socket = io();
+const API_URL = window.WESYNC_API_URL || "";
+const socket = io(API_URL || undefined);
 const $ = (id) => document.getElementById(id);
 const audio = $("audio");
 
@@ -51,7 +52,7 @@ function roomCodeNow() {
 
 // "/music/AB12/<file>": where the audio of a song is
 function songUrl(file) {
-  return "/music/" + roomCodeNow() + "/" + encodeURIComponent(file);
+  return API_URL + "/music/" + roomCodeNow() + "/" + encodeURIComponent(file);
 }
 
 // "?room=AB12&sid=<our socket id>": the server uses it to check that we are
@@ -1479,7 +1480,7 @@ async function loadSongs() {
   songsLoading = true;
   renderPlaylist();
   try {
-    const res = await fetch("/songs" + roomQuery());
+    const res = await fetch(API_URL + "/songs" + roomQuery());
     if (!res.ok) throw new Error("Bad response from /songs");
     const songs = await res.json();
 
@@ -1598,7 +1599,7 @@ async function uploadFiles(fileList) {
     try {
       const formData = new FormData();
       formData.append(UPLOAD_FIELD, file, file.name);
-      const res = await fetch("/upload" + roomQuery(), { method: "POST", body: formData });
+      const res = await fetch(API_URL + "/upload" + roomQuery(), { method: "POST", body: formData });
       if (res.ok) {
         uploaded++;
       } else {

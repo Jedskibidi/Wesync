@@ -23,11 +23,18 @@ This document describes how Wesync works and how to modify it. For setup and bas
 
 ## 1. Overview
 
-Wesync runs as a single Node.js process with three responsibilities:
+Wesync has two parts that are deployed separately:
 
-1. **Serving the website.** Express serves every file in `public/`.
-2. **Keeping room state.** Socket.IO connects every browser to the server, and the server decides what is playing, at what position, and for whom.
-3. **Storing uploaded songs.** Multer saves MP3 files into `music/<ROOM CODE>/`, and Express serves them back to the members of that room.
+- **`client/`** is a static website with no build step. It is hosted on Vercel.
+- **`server/`** is a single Node.js process. It is hosted on Render.
+
+The server has three responsibilities:
+
+1. **Keeping room state.** Socket.IO connects every browser to the server, and the server decides what is playing, at what position, and for whom.
+2. **Storing uploaded songs.** Multer saves MP3 files into `music/<ROOM CODE>/`, and Express serves them back to the members of that room.
+3. **Exposing the HTTP API.** Upload, song list, and audio endpoints (see section 5).
+
+During local development, setting `SERVE_CLIENT=true` makes the server also serve the `client/` folder, so both parts run from one address.
 
 ```
 Browser A ──┐                         ┌── music/AB12/song.mp3
@@ -35,7 +42,7 @@ Browser B ──┼── Socket.IO + HTTP ──► server.js ──┤
 Browser C ──┘                         └── rooms (Map, in memory)
 ```
 
-The server is the **single source of truth**. Browsers send actions (play, pause, seek, change song), the server updates the room, and then it notifies the other members.
+The browsers load the page from the client host and connect to the server host. The server is the **single source of truth**. Browsers send actions (play, pause, seek, change song), the server updates the room, and then it notifies the other members.
 
 There is no database and no login. All room data lives in memory and is discarded when the room closes.
 
@@ -160,16 +167,22 @@ Every event handler is wrapped in `handle()`. If a browser sends a value that is
 
 ## 5. HTTP endpoints
 
-| Method and path                          | Purpose                                                           |
-| ---------------------------------------- | ----------------------------------------------------------------- |
-| `GET /` and static files                 | Serves everything in `public/`.                                   |
-| `POST /upload?room=AB12&sid=<socket id>` | Uploads one MP3 to a room.                                        |
-| `GET /songs?room=AB12&sid=<socket id>`   | Lists the room's songs, newest first, as `[{ file, title }]`.     |
-| `GET /music/AB12/<file>`                 | Serves the audio file. Supports range requests, so seeking works. |
+| Method and path                          | Purpose                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `GET /`                                  | Returns a short status message. With `SERVE_CLIENT=true`, serves the `client/` folder instead. |
+| `POST /upload?room=AB12&sid=<socket id>` | Uploads one MP3 to a room.                                                                     |
+| `GET /songs?room=AB12&sid=<socket id>`   | Lists the room's songs, newest first, as `[{ file, title }]`.                                  |
+| `GET /music/AB12/<file>`                 | Serves the audio file. Supports range requests, so seeking works.                              |
 
 ### Proof of membership
 
 The `/upload` and `/songs` endpoints require the room code **and** the caller's own socket id (`sid`). Only that browser knows its socket id, and the server verifies that the id belongs to a member of that room. This prevents listing or uploading to rooms the caller has not joined.
+
+### Cross-origin access (CORS)
+
+Because the client and the server have different addresses, browsers only allow the client to call the server if the server permits it. The `CLIENT_ORIGINS` setting (see section 11) is the allow-list. It is applied to both the HTTP endpoints (`cors` middleware) and the Socket.IO connection. When it is empty, only same-origin requests work, which is the case in local development with `SERVE_CLIENT=true`.
+
+Audio is loaded from the server's address, so the `<audio>` element in `index.html` has `crossorigin="anonymous"`. This is required for the visualizer: the Web Audio API outputs silence for cross-origin audio that was not loaded with CORS enabled.
 
 ### JSON errors
 
@@ -250,6 +263,7 @@ If only one of the two settings is provided, or the code is not 4 letters or num
 | Wrong password lockout               | `passwordsLocked()`                | After 10 wrong passwords within a minute (from any source), every attempt is refused for a while.                                        |
 | Password checked first               | `joinRoom`                         | Users without the password cannot learn who is in the room.                                                                              |
 | Membership check on HTTP routes      | `roomForRequest()`                 | Requires the room code and the caller's socket id.                                                                                       |
+| Origin allow-list                    | `CLIENT_ORIGINS`, `cors`           | Browsers only allow pages from the configured frontend addresses to call the HTTP endpoints or open a socket connection.                 |
 | File name cleaning                   | `validSongFile()`, the music route | `path.basename()` blocks path traversal such as `../server.js`.                                                                          |
 | Only known songs are served          | `/music/:code/:file`               | A file must be in the room's song list, and the room must exist.                                                                         |
 | Upload rules                         | `uploadGuard`, Multer              | Type, size, count, total storage, and rate limits.                                                                                       |
@@ -266,16 +280,16 @@ If only one of the two settings is provided, or the code is not 4 letters or num
 
 ## 10. The client
 
-All client files are plain JavaScript in `public/`, with no build step.
+All client files are plain HTML, CSS, and JavaScript in `client/`, with no build step.
 
-| File            | Purpose                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------- |
-| `index.html`    | Layout: landing card (nickname, create, join), room card, player, playlist, queue, and the join overlay. |
-| `app.js`        | Almost all behavior: sockets, audio sync, playlist, queue, uploads, messages.                            |
-| `roominfo.js`   | Adds the member count, **Copy invite link**, and **Leave room** to the room card.                        |
-| `visualizer.js` | Draws animated pixel bars on a canvas, using the Web Audio API.                                          |
-| `library.js`    | An older song list. It is **no longer loaded**, since the Playlist card replaced it.                     |
-| `style.css`     | The honeybee theme (see [THEME.md](./THEME.md)).                                                         |
+| File            | Purpose                                                                                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.html`    | Layout: landing card (nickname, create, join), room card, player, playlist, queue, and the join overlay. Loads the Socket.IO client library from a CDN. |
+| `config.js`     | Sets `window.WESYNC_API_URL`, the address of the server.                                                                                                |
+| `app.js`        | Almost all behavior: sockets, audio sync, playlist, queue, uploads, messages.                                                                           |
+| `roominfo.js`   | Adds the member count, **Copy invite link**, and **Leave room** to the room card.                                                                       |
+| `visualizer.js` | Draws animated pixel bars on a canvas, using the Web Audio API.                                                                                         |
+| `style.css`     | The honeybee theme (see [THEME.md](./THEME.md)).                                                                                                        |
 
 `roominfo.js` and `visualizer.js` are loaded by `app.js` at the end, one script tag each. They use some names from `app.js` (such as `socket`, `audio`, `lastRoom`, and `showMessage`), so these names must be kept if anything is renamed.
 
@@ -293,6 +307,10 @@ All client files are plain JavaScript in `public/`, with no build step.
 | Server messages        | Connection state, errors, and all `socket.on` handlers.            |
 | Local buttons          | Changes the local audio **and** notifies the server.               |
 | Playlist and upload    | The song list, search, and MP3 upload with drag and drop.          |
+
+### Server address
+
+`config.js` runs before `app.js` and sets `window.WESYNC_API_URL`. On `localhost`, `127.0.0.1`, and addresses starting with `192.168.` or `10.`, the value is an empty string, which means the same origin as the page. Everywhere else, it is the address of the Render service. `app.js` prefixes the Socket.IO connection and the `/songs`, `/upload`, and `/music` requests with this value.
 
 ### Invite links
 
@@ -316,9 +334,9 @@ The seek bar moves 5 seconds with the arrow keys. The drop zone opens the file p
 
 ### Environment variables
 
-See the table in the README. Values must be positive numbers where a number is expected. Any invalid value falls back to the default.
+See the table in the README. `CLIENT_ORIGINS` is a comma-separated list of exact frontend addresses (scheme and domain, no trailing slash), for example `https://wesync.vercel.app`. `SERVE_CLIENT=true` is for local development only. Values must be positive numbers where a number is expected. Any invalid value falls back to the default.
 
-`.env` is loaded with `process.loadEnvFile`, which requires Node 20.12 or newer. On older versions the file is skipped without an error, so the variables must be set on the host instead. Settings already defined by the host are **not** overridden by the `.env` file.
+`server/.env` is loaded with `process.loadEnvFile`, which requires Node 20.12 or newer. On older versions the file is skipped without an error, so the variables must be set on the host instead. Settings already defined by the host are **not** overridden by the `.env` file.
 
 ### Fixed limits in `server.js`
 
@@ -337,21 +355,29 @@ See the table in the README. Values must be positive numbers where a number is e
 
 ### Change a limit
 
-Set the matching environment variable (for example `MAX_SONGS_PER_ROOM=10`) and restart the server. For the fixed limits, edit the constant in `server.js`. The 20 MB file limit is also checked in `app.js`, so both files must be changed.
+Set the matching environment variable (for example `MAX_SONGS_PER_ROOM=10`) and restart the server. For the fixed limits, edit the constant in `server/server.js`. The 20 MB file limit is also checked in `client/app.js`, so both files must be changed.
 
 ### Change how often clients are resynced
 
-Edit `TICK_INTERVAL_MS` in `server.js` and `DRIFT_LIMIT_SECONDS` in `app.js`. A smaller drift limit corrects more often but may cause small audio jumps.
+Edit `TICK_INTERVAL_MS` in `server/server.js` and `DRIFT_LIMIT_SECONDS` in `client/app.js`. A smaller drift limit corrects more often but may cause small audio jumps.
 
 ### Add a new room action
 
-1. Add a `handle(socket, "myEvent", ...)` block in `server.js`. Call `getRoomOf(socket)` first, update the room, then emit to the other members or use `broadcastState(room)`.
-2. In `app.js`, send the event with `sendToRoom("myEvent", data)` and add a `socket.on("myEvent", ...)` handler.
+1. Add a `handle(socket, "myEvent", ...)` block in `server/server.js`. Call `getRoomOf(socket)` first, update the room, then emit to the other members or use `broadcastState(room)`.
+2. In `client/app.js`, send the event with `sendToRoom("myEvent", data)` and add a `socket.on("myEvent", ...)` handler.
 3. To show a message to other members, call `announce(socket, room, "type", { title })` and handle the new type in the `activity` handler.
 
 ### Change the colors or fonts
 
-Edit the variables at the top of `style.css`. See [THEME.md](./THEME.md).
+Edit the variables at the top of `client/style.css`. See [THEME.md](./THEME.md).
+
+### Change the server address
+
+Edit the production address in `client/config.js` and redeploy the client.
+
+### Allow another frontend address
+
+Add it to `CLIENT_ORIGINS` on the server (comma-separated) and restart the server.
 
 ### Use a different port
 
@@ -366,22 +392,28 @@ Set `PORT`. Most hosts set it automatically.
 - **MP3 only**, up to 20 MB each.
 - **No accounts.** Nicknames are not unique across rooms, and anyone with a room code can join a room that has no password.
 - **Autoplay rules.** A listener who joins while music is playing must tap once before sound starts.
+- **Two hosts.** The client and the server are deployed separately, and both must be reachable. On a free plan, the server may need time to wake up, during which the page cannot connect.
+- **Fixed allow-list.** Only addresses in `CLIENT_ORIGINS` can connect. Vercel preview deployments use different addresses and are refused unless added.
 - **Small timing differences.** Each browser plays its own copy, so listeners may differ by a fraction of a second between ticks.
 
 ---
 
 ## 14. Troubleshooting
 
-| Problem                                               | Likely cause and fix                                                                                                          |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `Port 3000 is already in use`                         | Another instance is running. Stop it with Ctrl+C in its terminal, or set a different `PORT`.                                  |
-| Private room is not created                           | Both `PRIVATE_ROOM_CODE` (4 letters or numbers) and `PRIVATE_ROOM_PASSWORD` must be set. Check the warning in the server log. |
-| `.env` is ignored                                     | The Node version is older than 20.12. Update Node or set the variables on the host.                                           |
-| "Room XXXX not found"                                 | The room was deleted after sitting empty past the grace period, or the code contains a typo.                                  |
-| "You are not in this room" when uploading             | The page lost its connection, so the socket id changed. Wait for it to reconnect and try again.                               |
-| Upload refused with "room has reached its song limit" | Raise `MAX_SONGS_PER_ROOM`, or start a new room.                                                                              |
-| Upload refused with "Server storage is full"          | Raise `MAX_TOTAL_MB`, or wait for old rooms to close.                                                                         |
-| A listener hears nothing                              | The browser blocked audio. The listener must press **Tap to join the listening**, or click anywhere on the page.              |
-| Songs vanished after a deploy or restart              | Expected behavior. The server wipes all room folders on start.                                                                |
-| Sync keeps jumping                                    | The network is unstable. Raise `DRIFT_LIMIT_SECONDS` slightly so tiny differences are ignored.                                |
-| Different members see different queues                | Refresh one tab. The server sends the full queue on every change and when a member joins.                                     |
+| Problem                                                         | Likely cause and fix                                                                                                                                  |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Port 3000 is already in use`                                   | Another instance is running. Stop it with Ctrl+C in its terminal, or set a different `PORT`.                                                          |
+| Private room is not created                                     | Both `PRIVATE_ROOM_CODE` (4 letters or numbers) and `PRIVATE_ROOM_PASSWORD` must be set. Check the warning in the server log.                         |
+| `.env` is ignored                                               | The Node version is older than 20.12, or the file is not at `server/.env`. Update Node or set the variables on the host.                              |
+| "Room XXXX not found"                                           | The room was deleted after sitting empty past the grace period, or the code contains a typo.                                                          |
+| "You are not in this room" when uploading                       | The page lost its connection, so the socket id changed. Wait for it to reconnect and try again.                                                       |
+| Upload refused with "room has reached its song limit"           | Raise `MAX_SONGS_PER_ROOM`, or start a new room.                                                                                                      |
+| Upload refused with "Server storage is full"                    | Raise `MAX_TOTAL_MB`, or wait for old rooms to close.                                                                                                 |
+| A listener hears nothing                                        | The browser blocked audio. The listener must press **Tap to join the listening**, or click anywhere on the page.                                      |
+| Songs vanished after a deploy or restart                        | Expected behavior. The server wipes all room folders on start.                                                                                        |
+| Sync keeps jumping                                              | The network is unstable. Raise `DRIFT_LIMIT_SECONDS` slightly so tiny differences are ignored.                                                        |
+| Different members see different queues                          | Refresh one tab. The server sends the full queue on every change and when a member joins.                                                             |
+| CORS error in the browser console, or the socket never connects | `CLIENT_ORIGINS` on the server does not contain the exact frontend address (scheme and domain, no trailing slash). Correct it and restart the server. |
+| The page loads but cannot reach the server                      | `client/config.js` still contains the placeholder, or the address is wrong.                                                                           |
+| Audio plays but the visualizer is silent or the audio is muted  | The `<audio>` tag must have `crossorigin="anonymous"`, and the frontend address must be in `CLIENT_ORIGINS`.                                          |
+| The server address shows "Wesync server is running."            | Expected. The server provides only the API unless `SERVE_CLIENT=true`.                                                                                |

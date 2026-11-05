@@ -4,7 +4,9 @@ Wesync is a web app for listening to music together in real time. A user creates
 
 Built by **Jed Manaloto** and **Christine Fauni** with Node.js, Express, and Socket.IO. The interface uses a honeybee pixel art theme.
 
-**Live demo:** <https://wesync-shmf.onrender.com>
+The project has two parts: a Node.js server in `server/` and a static client in `client/`. They are hosted separately (server on Render, client on Vercel).
+
+**Live demo:** <https://YOUR-APP.vercel.app>
 
 ## Features
 
@@ -30,6 +32,7 @@ Built by **Jed Manaloto** and **Christine Fauni** with Node.js, Express, and Soc
 | Frontend  | HTML, CSS, vanilla JavaScript                  |
 | Audio     | HTML audio element, Web Audio API (visualizer) |
 | Fonts     | Pixelify Sans and VT323 (Google Fonts)         |
+| Hosting   | Render (server), Vercel (client)               |
 
 ## Getting Started
 
@@ -40,7 +43,19 @@ Built by **Jed Manaloto** and **Christine Fauni** with Node.js, Express, and Soc
 ### Installation
 
 ```bash
+cd server
 npm install
+```
+
+Create a file named `server/.env` containing:
+
+```
+SERVE_CLIENT=true
+```
+
+`SERVE_CLIENT=true` makes the server also serve the `client/` folder, so the whole app runs from one address during development. Without it, the server provides only the API.
+
+```bash
 npm start
 ```
 
@@ -48,12 +63,14 @@ The app is then available at <http://localhost:3000>.
 
 ### Development
 
-`npm run dev` restarts the server whenever a file changes. On Windows, `start.bat` opens the browser and starts the dev server.
+`npm run dev` (inside `server/`) restarts the server whenever a file changes. On Windows, `server/start.bat` enables `SERVE_CLIENT`, opens the browser, and starts the dev server. Client files are read from disk on each request, so a browser refresh is enough to see client changes.
 
 ### Testing with multiple listeners
 
 - **Same network:** open `http://<local-ip-of-the-host-computer>:3000` on the other device.
 - **Single machine:** open the page in two browser tabs.
+
+`client/config.js` treats `localhost`, `127.0.0.1`, and addresses starting with `192.168.` or `10.` as local and uses the same origin as the page. For other address ranges, edit the check in that file.
 
 ## Usage
 
@@ -67,19 +84,29 @@ Volume is local. Each listener controls their own.
 
 ## Configuration
 
-All settings are optional. They can be set as environment variables on the host or in a local `.env` file. The server must be restarted after a change.
+Settings are read by the server. They can be set as environment variables on the host or in a local `server/.env` file. The server must be restarted after a change. `CLIENT_ORIGINS` is required when the client is hosted separately; every other setting is optional.
 
-| Variable                 | Default | Description                                               |
-| ------------------------ | ------- | --------------------------------------------------------- |
-| `PORT`                   | `3000`  | Port the server listens on.                               |
-| `MAX_SONGS_PER_ROOM`     | `20`    | Most songs one room can upload.                           |
-| `MAX_TOTAL_MB`           | `2048`  | Most disk space all rooms together can use, in megabytes. |
-| `MAX_UPLOADS_PER_MINUTE` | `20`    | Most uploads one user can start per minute.               |
-| `ROOM_GRACE_SECONDS`     | `180`   | How long an empty room is kept before it is deleted.      |
-| `PRIVATE_ROOM_CODE`      | none    | Code of the private room (4 letters or numbers).          |
-| `PRIVATE_ROOM_PASSWORD`  | none    | Password of the private room.                             |
-| `PRIVATE_ROOM_MAX_SONGS` | `50`    | Most songs the private room can hold.                     |
+| Variable                 | Default | Description                                                                                                               |
+| ------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                   | `3000`  | Port the server listens on.                                                                                               |
+| `MAX_SONGS_PER_ROOM`     | `20`    | Most songs one room can upload.                                                                                           |
+| `MAX_TOTAL_MB`           | `2048`  | Most disk space all rooms together can use, in megabytes.                                                                 |
+| `MAX_UPLOADS_PER_MINUTE` | `20`    | Most uploads one user can start per minute.                                                                               |
+| `ROOM_GRACE_SECONDS`     | `180`   | How long an empty room is kept before it is deleted.                                                                      |
+| `PRIVATE_ROOM_CODE`      | none    | Code of the private room (4 letters or numbers).                                                                          |
+| `PRIVATE_ROOM_PASSWORD`  | none    | Password of the private room.                                                                                             |
+| `PRIVATE_ROOM_MAX_SONGS` | `50`    | Most songs the private room can hold.                                                                                     |
+| `CLIENT_ORIGINS`         | none    | Comma-separated frontend addresses allowed to connect, without a trailing slash, for example `https://wesync.vercel.app`. |
+| `SERVE_CLIENT`           | none    | When `true`, the server also serves the `client/` folder. For local development only.                                     |
 
+Example `.env` file:
+
+```
+SERVE_CLIENT=true
+PRIVATE_ROOM_CODE=LOVE
+PRIVATE_ROOM_PASSWORD=choose-something-only-you-know
+PRIVATE_ROOM_MAX_SONGS=50
+```
 
 ### Private room
 
@@ -91,32 +118,49 @@ The `.env` file must never be committed. It is already listed in `.gitignore`.
 
 ```
 Wesync/
-├── server.js          Express and Socket.IO server: rooms, sync, queue, uploads
-├── public/
-│   ├── index.html     Page layout
-│   ├── style.css      Honeybee pixel theme
-│   ├── app.js         Main client logic: rooms, audio sync, playlist, queue
-│   ├── roominfo.js    Member count, copy invite link, leave room
-│   ├── visualizer.js  Animated audio bars
-│   └── library.js     Older song list (no longer loaded)
-├── music/             Temporary uploaded songs, one folder per room
-├── start.bat          Windows shortcut to start the dev server
-└── package.json
+├── server/
+│   ├── server.js      Express and Socket.IO server: rooms, sync, queue, uploads
+│   ├── music/         Temporary uploaded songs, one folder per room
+│   ├── start.bat      Windows shortcut to start the dev server
+│   └── package.json
+└── client/
+    ├── index.html     Page layout
+    ├── config.js      Address of the server
+    ├── style.css      Honeybee pixel theme
+    ├── app.js         Main client logic: rooms, audio sync, playlist, queue
+    ├── roominfo.js    Member count, copy invite link, leave room
+    └── visualizer.js  Animated audio bars
 ```
 
 ## Deployment
 
-Wesync runs on any host that can run a Node.js server and keep WebSocket connections open, such as Render.
+The server and the client are deployed separately.
 
+### Server (Render)
+
+The server needs a host that can run a Node.js process and keep WebSocket connections open.
+
+- **Root directory:** `server`
 - **Build command:** `npm install`
 - **Start command:** `npm start`
-- **Environment variables:** any variable from the configuration table can be set in the host's settings.
+- **Environment variables:** `CLIENT_ORIGINS` set to the address of the client (for example `https://wesync.vercel.app`, without a trailing slash), plus any other variable from the configuration table. `SERVE_CLIENT` is not set in production.
 
-Notes:
+### Client (Vercel)
+
+The client is a static site with no build step.
+
+- **Root directory:** `client`
+- **Framework preset:** Other
+- **Build command:** none
+
+Before deploying, set the server's address in `client/config.js` (replace the placeholder `https://YOUR-WESYNC-SERVER.onrender.com`).
+
+### Notes
 
 - Rooms are stored in the server's memory, so only **one instance** can run. Multiple instances do not share room data.
 - Uploaded songs are temporary. They are deleted when a room closes and when the server restarts.
-- On a free hosting plan, the service may sleep after a period of inactivity, which makes the first request afterward slow to load.
+- On a free hosting plan, the server may sleep after a period of inactivity, which makes the first connection afterward slow.
+- Only addresses listed in `CLIENT_ORIGINS` can connect. Vercel preview deployments use different addresses and are refused unless added to the list.
 
 ## Limits
 

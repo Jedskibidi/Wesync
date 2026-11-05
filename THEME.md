@@ -51,25 +51,25 @@ Both fonts are available from Google Fonts under the SIL Open Font License. VT32
 
 ## Pixel Sprites and Patterns
 
-| Name           | Class or Variable                           | Usage                                       |
-| -------------- | ------------------------------------------- | ------------------------------------------- |
-| Bee            | `.spr .spr-bee`                             | Logo, now-playing marker in the track list  |
-| Honey Cell     | `.spr .spr-cell`                            | Album art placeholder                       |
-| Flower         | `.spr .spr-flower`                          | Decoration                                  |
-| Gramophone     | `.stage` with `--spr-gramo` and `--spr-arm` | The player                                  |
-| Music Notes    | `.note`, `.note.n2`                         | Float out of the horn while a song plays    |
-| Sprout Pattern | `--pat-sprout`                              | Page background                             |
-| Striped Band   | `--pat-band`                                | Top and bottom edge of the page             |
+| Name           | Class or Variable                           | Usage                                      |
+| -------------- | ------------------------------------------- | ------------------------------------------ |
+| Bee            | `.spr .spr-bee`                             | Logo, now-playing marker in the track list |
+| Honey Cell     | `.spr .spr-cell`                            | Album art placeholder                      |
+| Flower         | `.spr .spr-flower`                          | Decoration                                 |
+| Gramophone     | `.stage` with `--spr-gramo` and `--spr-arm` | The player                                 |
+| Music Notes    | `.note`, `.note.n2`                         | Float out of the horn while a song plays   |
+| Sprout Pattern | `--pat-sprout`                              | Page background                            |
+| Striped Band   | `--pat-band`                                | Top and bottom edge of the page            |
 
 Sprites should be scaled by whole numbers (2x, 3x, 4x) so the pixels stay even.
 
 ## Files
 
-| File            | Purpose                                                      |
-| --------------- | ------------------------------------------------------------ |
-| `index.html`    | Page layout (room form and player)                           |
-| `style.css`     | Theme, components, gramophone, layout                        |
-| `app.js`        | Room, socket, and audio sync logic                           |
-| `visualizer.js` | Spinning disc, floating notes, cover picker, slider fills    |
+| File            | Purpose                                                   |
+| --------------- | --------------------------------------------------------- |
+| `index.html`    | Page layout (room form and player)                        |
+| `style.css`     | Theme, components, gramophone, layout                     |
+| `app.js`        | Room, socket, and audio sync logic                        |
+| `visualizer.js` | Spinning disc, floating notes, cover picker, slider fills |
 
 The rule `[hidden] { display: none !important; }` must remain at the top of `style.css`. The player stays hidden until the user is in a room.

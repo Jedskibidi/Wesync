@@ -169,7 +169,7 @@
             />
           </div>
 
-          <audio id="audio" preload="auto"></audio>
+          <audio id="audio" preload="auto" crossorigin="anonymous"></audio>
         </section>
 
         <!-- Right: playlist (with upload) and the room queue -->
@@ -236,7 +236,8 @@
       </div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="config.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.8.1/dist/socket.io.min.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
