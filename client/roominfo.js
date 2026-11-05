@@ -1,25 +1,23 @@
-// Room info (task 9): member count, "Copy invite link", "Leave room".
-//
-// Works on the #roomInfo card that index.html already has, and uses the
-// existing #room element. Does not touch index.html or style.css.
-//
-// It uses these things from app.js:
-//   socket, inRoom, lastRoom, rejoining, pendingAction,
-//   clearSong(), hideOverlay(), clearUrl(), showMessage(), showError(),
-//   showLanding(), clearFieldErrors()
-// Keep those names if app.js is ever changed.
+/**
+ * @file roominfo.js
+ * @description Fills the #roomInfo card in index.html with the member count,
+ * a "Copy invite link" button, and a "Leave room" button. Uses the existing
+ * #room element and does not touch index.html or style.css.
+ * Depends on these names from app.js (keep them if app.js changes): socket,
+ * inRoom, lastRoom, rejoining, pendingAction, clearSong(), hideOverlay(),
+ * clearUrl(), showMessage(), showError(), showToast(), showLanding(),
+ * clearFieldErrors().
+ * @location client\roominfo.js
+ */
 
 (() => {
   const card = document.getElementById("roomInfo");
-  if (!card) return; // the page has no room card, nothing to fill
-
-  // ---------- Build the extra parts ----------
+  if (!card) return;
 
   const count = document.createElement("p");
   count.className = "room-info";
   count.textContent = "1 person in this room";
 
-  // Put the count right under the "Room: XXXX" line
   const roomLine = document.getElementById("room").closest("p");
   if (roomLine) roomLine.insertAdjacentElement("afterend", count);
   else card.appendChild(count);
@@ -40,8 +38,6 @@
   buttons.append(copyButton, leaveButton);
   card.appendChild(buttons);
 
-  // ---------- Member count ----------
-
   function showCount(members) {
     const n = members.length;
     count.textContent =
@@ -51,26 +47,19 @@
   socket.on("roomState", (state) => showCount(state.members));
   socket.on("membersUpdate", (data) => showCount(data.members));
 
-  // ---------- Copy invite link ----------
-
-  // The link uses the address you opened the site with, plus ?room=CODE
   function inviteLink() {
     const code = document.getElementById("room").textContent.trim();
     return `${location.origin}${location.pathname}?room=${code}`;
   }
 
   async function copyText(text) {
-    // The modern way (needs https or localhost)
     if (navigator.clipboard && window.isSecureContext) {
       try {
         await navigator.clipboard.writeText(text);
         return true;
-      } catch (err) {
-        // fall through to the older way
-      }
+      } catch (err) {}
     }
 
-    // The older way, which also works on plain http addresses
     const box = document.createElement("textarea");
     box.value = text;
     box.setAttribute("readonly", "");
@@ -103,24 +92,21 @@
     }
 
     copyButton.textContent = "Copied!";
-    showToast("Invite link copied"); // also read out by screen readers
+    showToast("Invite link copied");
     clearTimeout(copiedTimer);
     copiedTimer = setTimeout(() => {
       copyButton.textContent = "Copy invite link";
     }, 1500);
   };
 
-  // ---------- Leave room ----------
-
   leaveButton.onclick = () => {
     if (!inRoom) return;
     socket.emit("leaveRoom");
   };
 
-  // The server says we are out: go back to the first screen
   socket.on("leftRoom", () => {
     inRoom = false;
-    lastRoom = null; // so we do NOT rejoin by ourselves later
+    lastRoom = null;
     rejoining = false;
     pendingAction = null;
 
@@ -134,7 +120,6 @@
 
     showLanding();
 
-    // Tell other parts (like the song library) that we left
     document.dispatchEvent(new Event("roomLeft"));
   });
 })();
