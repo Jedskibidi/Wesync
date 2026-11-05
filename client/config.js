@@ -9,5 +9,5 @@
     host === "127.0.0.1" ||
     /^192\.168\./.test(host) ||
     /^10\./.test(host);
-  window.WESYNC_API_URL = isLocal ? "" : "https://YOUR-WESYNC-SERVER.onrender.com";
+  window.WESYNC_API_URL = isLocal ? "" : "https://wesync-shmf.onrender.com";
 })();
